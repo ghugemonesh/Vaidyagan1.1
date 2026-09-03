@@ -1,1 +1,118 @@
 @import "tailwindcss";
+
+@theme {
+  --font-display: "Fraunces", Georgia, serif;
+  --font-body: "Manrope", "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace;
+
+  --color-forest-950: #0a130e;
+  --color-forest-900: #0f1a13;
+  --color-forest-850: #132117;
+  --color-forest-800: #182a1e;
+  --color-forest-700: #20392a;
+  --color-forest-600: #2c4d38;
+  --color-moss-500: #5f7f62;
+  --color-moss-400: #7fa07f;
+  --color-moss-300: #a6c0a0;
+  --color-sand-50: #f7f1e3;
+  --color-sand-100: #f1e9d6;
+  --color-sand-200: #e7dcbf;
+  --color-sand-300: #d5c69e;
+  --color-sand-400: #bdab7d;
+  --color-gold-300: #e8cf8b;
+  --color-gold-400: #d6b45f;
+  --color-gold-500: #c49c3e;
+  --color-gold-600: #a37e2a;
+  --color-steel-300: #b7cbde;
+  --color-steel-400: #93b1cf;
+  --color-ember-300: #f0a377;
+  --color-ember-400: #e07f49;
+  --color-ember-500: #c96430;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--color-forest-950);
+  color: var(--color-sand-100);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--color-gold-400);
+  color: var(--color-forest-950);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-forest-900);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-forest-700);
+  border-radius: 8px;
+  border: 2px solid var(--color-forest-900);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-gold-600);
+}
+
+.gold-rule {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--color-gold-500), transparent);
+}
+
+.ops-grid {
+  background-image: linear-gradient(rgba(214, 180, 95, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(214, 180, 95, 0.04) 1px, transparent 1px);
+  background-size: 44px 44px;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.fade-up {
+  animation: fade-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
