@@ -16,12 +16,13 @@ import {
 
 import { useDb, listProducts, getSettings, listOrders, getProduct, type Product } from "../lib/data";
 import { useToast } from "../components/ui";
+import { BrandLockup } from "../components/brand";
 import {
   IMG, productImage, pdpFor, publishedArticles, getArticle, articleToc, withHeadingIds,
   readingMinutes, listHerbs, QUIZ_QUESTIONS, DOSHA_RESULTS,
   loadCart, persistCart, validateDiscountCode, placeOrder, inr, formatDate,
   accountSession, loginOtp, loginGoogle, loginEmail, registerEmail, logoutAccount, updateAccount,
-  allArticles, listUserArticles,
+  allArticles, listUserArticles, AUTHORS,
   type Article, type CartLine, type Account, type AccountAddress, type Herb,
 } from "../lib/platform";
 
@@ -221,14 +222,8 @@ const NAV = [
 
 function Brand() {
   return (
-    <Link to="/" className="group flex items-center gap-2.5">
-      <span className="relative grid h-11 w-11 place-items-center rounded-xl border border-gold-500/60 bg-forest-850 text-gold-400 transition-all duration-500 group-hover:rotate-12 group-hover:shadow-[0_0_24px_rgba(214,180,95,0.35)]">
-        <Leaf size={21} />
-      </span>
-      <span>
-        <span className="block font-display text-lg font-semibold leading-none text-sand-100">Vaidyagan</span>
-        <span className="mt-0.5 block font-mono text-[8px] uppercase tracking-[0.3em] text-gold-400/80">वैद्यगण · clinically verified</span>
-      </span>
+    <Link to="/" className="group block" aria-label="Vaidyagan — home">
+      <BrandLockup size="sm" />
     </Link>
   );
 }
@@ -331,7 +326,24 @@ function SiteFooter() {
             <p className="mt-6 flex items-center gap-2 text-sm text-sand-200/60"><Mail size={14} className="text-gold-500" /> {settings.contactEmail}</p>
           </div>
         </div>
-        <div className="mt-14 flex flex-col items-start justify-between gap-4 border-t border-forest-800 pt-6 sm:flex-row sm:items-center">
+        {/* the publishing desk */}
+        <div className="mt-14 border-t border-forest-800 pt-8">
+          <p className="font-mono text-[9.5px] uppercase tracking-[0.28em] text-gold-400/70">The publishing desk</p>
+          <div className="mt-4 flex flex-wrap gap-x-8 gap-y-3">
+            {Object.values(AUTHORS).map((a) => (
+              <div key={a.name} className="flex items-center gap-2.5">
+                <span className="grid place-items-center rounded-full font-display text-[11px] font-semibold" style={{ height: 30, width: 30, background: `${a.hue}18`, color: a.hue, border: `1px solid ${a.hue}55` }}>
+                  {a.initials}
+                </span>
+                <div>
+                  <p className="flex items-center gap-1.5 text-[12.5px] font-semibold text-sand-100">{a.name}<BadgeCheck size={12} className="text-gold-400" /></p>
+                  <p className="font-mono text-[8px] uppercase tracking-[0.14em] text-sand-200/40">{a.qualification}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="mt-8 flex flex-col items-start justify-between gap-4 border-t border-forest-800 pt-6 sm:flex-row sm:items-center">
           <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-sand-200/40">© 2026 Vaidyagan · Knowledge is medicine</p>
           <Link to="/admin" className="font-mono text-[10px] uppercase tracking-[0.18em] text-sand-200/30 transition-colors hover:text-gold-400">Admin Console</Link>
         </div>
@@ -445,6 +457,39 @@ function HomePage({ onAdd, onCart }: { onAdd: (id: string) => void; onCart: () =
                     </p>
                   </div>
                 </Link>
+              </Reveal>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* doctor's corner */}
+      <section className="relative border-b border-forest-800 bg-forest-900/40">
+        <div className="leaf-field absolute inset-0" aria-hidden />
+        <div className="relative mx-auto max-w-7xl px-5 py-20 lg:px-8 lg:py-24">
+          <SectionHead
+            eyebrow="Doctor's corner"
+            title={<>The vaidyas behind <em className="text-gold-300">every word</em>.</>}
+            sub="No ghostwriters, no aggregators. Registered practitioners, decades of OPD between them, accountable by name."
+          />
+          <div className="no-scrollbar -mx-5 mt-10 flex snap-x gap-5 overflow-x-auto px-5 pb-2 lg:mx-0 lg:grid lg:grid-cols-4 lg:overflow-visible lg:px-0">
+            {Object.values(AUTHORS).map((a, i) => (
+              <Reveal key={a.name} delay={i * 90} className="w-[280px] shrink-0 snap-start lg:w-auto">
+                <div className="group flex h-full flex-col rounded-xl border border-forest-800 bg-forest-950/70 p-6 transition-all duration-500 hover:-translate-y-1.5 hover:border-gold-500/50">
+                  <div className="flex items-center justify-between">
+                    <span className="grid h-13 w-13 place-items-center rounded-full font-display text-lg font-semibold" style={{ height: 52, width: 52, background: `${a.hue}18`, color: a.hue, border: `1px solid ${a.hue}55` }}>
+                      {a.initials}
+                    </span>
+                    <span className="flex items-center gap-1.5 rounded-full border border-gold-500/40 px-3 py-1 font-mono text-[8.5px] uppercase tracking-[0.18em] text-gold-300">
+                      <BadgeCheck size={12} /> Verified BAMS
+                    </span>
+                  </div>
+                  <p className="mt-5 font-display text-xl font-semibold text-sand-100">{a.name}</p>
+                  <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.16em] text-gold-400/80">{a.qualification}</p>
+                  <p className="mt-3 text-[13px] leading-relaxed text-sand-200/55">
+                    Writes and reviews for the journal; every essay carries their registration-grade accountability.
+                  </p>
+                </div>
               </Reveal>
             ))}
           </div>

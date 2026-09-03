@@ -18,6 +18,7 @@ import {
 
 import { useDb, listProducts, saveProduct, setProductStock, setProductVisible, listOrders, updateOrderStatus, cancelAndRestock, getSettings, saveSettings, downloadFile, inr as inrFmt, type Order, type Product, type OrderStatus } from "../lib/data";
 import { useToast } from "../components/ui";
+import { LogoTile } from "../components/brand";
 import {
   studioLogin, studioSession, studioLogout, AUTHORS, allArticles, saveArticle, deleteArticle, publishArticle,
   articleToc, listHerbs, saveHerb, deleteHerb, resetHerbs, getProfile, saveProfile, blankProfile, productImage,
@@ -63,7 +64,7 @@ function LoginGate({ onLogin }: { onLogin: (u: StudioUser) => void }) {
       <div className="leaf-field absolute inset-0" aria-hidden />
       <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} className="relative w-full max-w-md rounded-2xl border border-forest-700 bg-forest-900/80 p-8 backdrop-blur">
         <div className="text-center">
-          <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl border border-gold-500/50 bg-gold-400/10 text-gold-300"><Lock size={22} /></span>
+          <span className="group mx-auto inline-block"><LogoTile size="lg" /></span>
           <h1 className="mt-5 font-display text-3xl font-semibold text-sand-100">Doctor Studio</h1>
           <p className="mt-2 font-mono text-[9.5px] uppercase tracking-[0.26em] text-gold-400/80">वैद्यगण · publishing desk</p>
         </div>
@@ -868,8 +869,8 @@ export default function Studio() {
     <div className="min-h-screen bg-forest-950">
       <header className="sticky top-0 z-50 border-b border-forest-800 bg-forest-950/90 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-3.5 lg:px-8">
-          <Link to="/" className="flex items-center gap-2.5">
-            <span className="grid h-10 w-10 place-items-center rounded-xl border border-gold-500/50 bg-forest-850 text-gold-400"><Leaf size={18} /></span>
+          <Link to="/" className="group flex items-center gap-3" aria-label="Back to Vaidyagan">
+            <LogoTile size="sm" />
             <span>
               <span className="block font-display text-lg font-semibold leading-none text-sand-100">Doctor Studio</span>
               <span className="mt-0.5 block font-mono text-[8px] uppercase tracking-[0.26em] text-gold-400/80">वैद्यगण · publishing desk</span>

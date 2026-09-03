@@ -21,6 +21,7 @@ import {
 } from "../lib/data";
 import { getConsoleMode, hasFirebaseConfig, setConsoleMode } from "../lib/firebase";
 import { Badge, StatCard, EmptyState, useToast } from "../components/ui";
+import { LogoTile } from "../components/brand";
 import { OrdersPage, ProductsPage, CustomersPage, StaffPage, ContentPage, MarketingPage, AnalyticsPage, SettingsPage } from "./ConsolePages";
 
 type PageId = "home" | "orders" | "products" | "customers" | "staff" | "content" | "marketing" | "analytics" | "settings";
@@ -64,10 +65,8 @@ function LoginScreen() {
       <span aria-hidden className="pointer-events-none absolute -bottom-40 -right-32 h-[28rem] w-[28rem] rounded-full bg-moss-500/10 blur-3xl" />
       <motion.div initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
         className="relative w-full max-w-md rounded-2xl border border-forest-700 bg-forest-900/85 p-8 shadow-[0_40px_120px_rgba(0,0,0,0.55)] backdrop-blur">
-        <div className="flex items-center gap-3">
-          <span className="grid h-12 w-12 place-items-center rounded-2xl border border-gold-500/40 bg-gold-400/10 text-gold-300">
-            <Leaf size={22} />
-          </span>
+        <div className="flex items-center gap-3.5">
+          <span className="group inline-block"><LogoTile size="sm" /></span>
           <div>
             <p className="font-display text-2xl font-semibold leading-none text-sand-100">Vaidyagan</p>
             <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.28em] text-gold-400/70">Admin Console</p>
@@ -437,9 +436,7 @@ function SidebarContent({ collapsed, page, go, allowed, onCollapse, isMobile }: 
   return (
     <>
       <div className={`flex items-center gap-3 border-b border-forest-800 px-4 py-5 ${collapsed && !isMobile ? "justify-center px-2" : ""}`}>
-        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-gold-500/40 bg-gold-400/10 text-gold-300">
-          <Leaf size={19} />
-        </span>
+        <span className="group inline-block shrink-0"><LogoTile size="sm" /></span>
         {(!collapsed || isMobile) && (
           <div className="min-w-0">
             <p className="truncate font-display text-lg font-semibold leading-none text-sand-100">Vaidyagan</p>
