@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { useApp, auth, readImageFile, SmartImg, type StudioUser } from "./lib";
 import {
@@ -16,6 +16,11 @@ import {
 import { HerbManager } from "./herbs-admin";
 import {
   loadStaff, saveStaffRole, saveStaffAccess, inviteStaff, seedFounder as seedFounderDoc, type StaffRecord,
+  loadOrders, loadProducts, loadPageViewsF, loadCustomers, updateCustomerFlagsF, type CustomerRow,
+  loadPosts, savePostF, deletePostF,
+  loadDiscountsF, saveDiscountF, deleteDiscountF,
+  listHiddenReviewsF, toggleHiddenReviewF,
+  loadSettingsF, saveSettingsF, logActivity, pushNotificationF,
 } from "./console/data";
 import {
   Check, Close, Plus, Trash, Download, Upload, Search, Star, Shield, Lock, Users, Eye, Clock, Key, Bell,
@@ -65,25 +70,38 @@ export function timeAgo(iso: string): string {
 }
 
 export type CRole = "superadmin" | "editor" | "viewer";
-export interface PageProps { role: CRole; refresh: () => void }
+export interface PageProps { role: CRole; refresh: () => void; tick?: number }
 
 /* --------------------------------- customers -------------------------------- */
 
-export function CustomersPage({ role }: PageProps) {
-  const { orders, toast } = useApp();
+export function CustomersPage({ role, refresh, tick }: PageProps) {
+  const { toast } = useApp();
+  const [all, setAll] = useState<CustomerRow[] | null>(null);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [err, setErr] = useState<string | null>(null);
+  const [rtick, setRtick] = useState(0);
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<"all" | "repeat" | "new">("all");
   const [openId, setOpenId] = useState<string | null>(null);
-  const [, force] = useState(0);
+  const reload = useCallback(() => setRtick((x) => x + 1), []);
+
+  /* customers + their orders come from the mode-aware facade */
+  useEffect(() => {
+    let on = true;
+    setErr(null);
+    Promise.all([loadCustomers(), loadOrders()])
+      .then(([c, o]) => { if (on) { setAll(c); setOrders(o); } })
+      .catch(() => { if (on) { setAll(null); setErr("Customers couldn't be read from the database. Nothing was changed — retry when ready."); } });
+    return () => { on = false; };
+  }, [rtick, tick]);
 
   const customers = useMemo(() => {
-    const all = listCustomersWithStats();
     const needle = q.trim().toLowerCase();
-    return all
+    return (all ?? [])
       .filter((c) => !needle || c.name.toLowerCase().includes(needle) || c.email.toLowerCase().includes(needle) || c.phone.includes(needle))
       .filter((c) => filter === "all" || (filter === "repeat" ? c.orders > 1 : Date.now() - new Date(c.createdAt).getTime() < 30 * 86400e3))
       .sort((a, b) => b.spent - a.spent);
-  }, [q, filter, orders.length]);
+  }, [all, q, filter]);
 
   const open = customers.find((c) => c.id === openId) ?? null;
   const openOrders = open ? orders.filter((o) => o.customerId === open.id) : [];
@@ -533,8 +551,27 @@ export function MarketingPage({ role }: PageProps) {
 
 /* --------------------------------- analytics -------------------------------- */
 
-export function AnalyticsPage() {
-  const { orders, products } = useApp();
+export function AnalyticsPage({ tick }: { tick: number }) {
+  /* analytics read through the facade so Live Mode charts Firestore data */
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [views, setViews] = useState<[string, number][]>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let on = true;
+    setLoading(true);
+    Promise.all([loadOrders(), loadProducts(), loadPageViewsF()])
+      .then(([o, p, pv]) => {
+        if (!on) return;
+        setOrders(o); setProducts(p);
+        const map = new Map<string, number>();
+        pv.forEach((v) => map.set(v.page, (map.get(v.page) ?? 0) + 1));
+        setViews([...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6));
+        setLoading(false);
+      })
+      .catch(() => { if (on) setLoading(false); });
+    return () => { on = false; };
+  }, [tick]);
 
   const days = useMemo(() => {
     const out: { label: string; total: number }[] = [];
@@ -562,11 +599,6 @@ export function AnalyticsPage() {
   }, [orders]);
   const maxTop = Math.max(1, ...topProducts.map((t) => t.revenue));
 
-  const views = useMemo(() => {
-    const map = new Map<string, number>();
-    listPageViews().forEach((v) => map.set(v.page, (map.get(v.page) ?? 0) + 1));
-    return [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
-  }, []);
   const maxView = Math.max(1, ...views.map(([, n]) => n));
 
   const donut = useMemo(() => {

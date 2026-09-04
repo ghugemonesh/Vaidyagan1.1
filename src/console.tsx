@@ -9,7 +9,8 @@ import {
   loadOrders, advanceOrderStatus, cancelOrderRestock, bulkShipOrders,
   loadProducts, saveProductF, deleteProductF,
   listNotificationsF, markAllReadF, pushNotificationF, loadSearchIndex, type SearchIndex,
-  loadDiscountsF, saveDiscountF, loadCustomers, loadPosts, loadActivity, type ActivityRecord, type CustomerRow,
+  loadDiscountsF, saveDiscountF, loadCustomers, loadPosts, loadActivity, logActivity,
+  type ActivityRecord, type CustomerRow,
 } from "./console/data";
 import type { Article } from "./data";
 import { EmptyState, ErrorState, ListSkeleton, Skeleton } from "./console/ui";
@@ -17,7 +18,6 @@ import {
   CustomersPage, StaffPage, ContentPage, MarketingPage, AnalyticsPage, SettingsPage,
   Switch, downloadFile, cInp, cLbl, timeAgo, type CRole,
 } from "./console-pages";
-import { loadActivity } from "./console/data";
 import {
   Leaf, Gear, Cart, Users, Book, Mortar, Star, Search, Close, Check, Plus, Trash, Download,
   Shield, Lock, Eye, ChevronDown, Activity, Bell, Menu, LayoutGrid, Person, Send,
@@ -62,7 +62,7 @@ export function AdminConsole() {
   const [bellOpen, setBellOpen] = useState(false);
   const [avatarOpen, setAvatarOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [, setTick] = useState(0);
+  const [tick, setTick] = useState(0);
   const refresh = () => setTick((x) => x + 1);
 
   /* seed demo analytics, a welcome notification and a starter discount once */
@@ -92,19 +92,35 @@ export function AdminConsole() {
     if (!PAGE_ACCESS[page].includes(role)) setPage("home");
   }, [page, role]);
 
-  /* global search index */
-  const { orders, products, allArticles } = useApp();
-  const customers = useMemo(() => listCustomersWithStats(), [orders.length, session]);
+  /* global search index — async so it honours Demo ⇄ Live mode */
+  const [searchIndex, setSearchIndex] = useState<SearchIndex>({ orders: [], products: [], posts: [], customers: [] });
+  const [searchErr, setSearchErr] = useState(false);
+  const loadIndex = useCallback(() => {
+    setSearchErr(false);
+    loadSearchIndex()
+      .then((i) => setSearchIndex(i))
+      .catch(() => setSearchErr(true));
+  }, []);
+  useEffect(() => { loadIndex(); }, [loadIndex, tick]);
+
+  /* notifications — async so Live Mode reads Firestore */
+  const [notes, setNotes] = useState<{ id: string; title: string; body: string; read: boolean; at: string }[]>([]);
+  useEffect(() => {
+    let on = true;
+    listNotificationsF().then((n) => { if (on) setNotes(n); }).catch(() => undefined);
+    return () => { on = false; };
+  }, [tick, bellOpen]);
+
   const searchResults = useMemo(() => {
     const needle = search.trim().toLowerCase();
     if (needle.length < 2) return [];
     const out: { page: Page; kind: string; label: string; sub: string; id: string }[] = [];
-    orders.forEach((o) => { if (o.id.toLowerCase().includes(needle) || o.customer.name.toLowerCase().includes(needle)) out.push({ page: "orders", kind: "Order", label: o.id, sub: `${o.customer.name} · ₹${o.total}`, id: o.id }); });
-    products.forEach((p) => { if (p.name.toLowerCase().includes(needle)) out.push({ page: "products", kind: "Product", label: p.name, sub: `₹${p.price} · ${p.stock} in stock`, id: p.id }); });
-    customers.forEach((c) => { if (c.name.toLowerCase().includes(needle) || c.email.toLowerCase().includes(needle)) out.push({ page: "customers", kind: "Customer", label: c.name, sub: `${c.orders} orders · ₹${c.spent}`, id: c.id }); });
-    allArticles.forEach((a) => { if (a.title.toLowerCase().includes(needle)) out.push({ page: "content", kind: "Post", label: a.title, sub: a.status, id: a.id }); });
+    searchIndex.orders.forEach((o) => { if (o.id.toLowerCase().includes(needle) || o.customer.name.toLowerCase().includes(needle)) out.push({ page: "orders", kind: "Order", label: o.id, sub: `${o.customer.name} · ₹${o.total}`, id: o.id }); });
+    searchIndex.products.forEach((p) => { if (p.name.toLowerCase().includes(needle)) out.push({ page: "products", kind: "Product", label: p.name, sub: `₹${p.price} · ${p.stock} in stock`, id: p.id }); });
+    searchIndex.customers.forEach((c) => { if (c.name.toLowerCase().includes(needle) || c.email.toLowerCase().includes(needle)) out.push({ page: "customers", kind: "Customer", label: c.name, sub: `${c.orders} orders · ₹${c.spent}`, id: c.id }); });
+    searchIndex.posts.forEach((a) => { if (a.title.toLowerCase().includes(needle)) out.push({ page: "content", kind: "Post", label: a.title, sub: a.status, id: a.id }); });
     return out.slice(0, 8);
-  }, [search, orders, products, customers, allArticles]);
+  }, [search, searchIndex]);
 
   const goTo = (p: Page, q = "") => {
     setPage(p); setQuery(q); setSearch(q); setSearchOpen(false); setMobileNav(false);
@@ -133,8 +149,8 @@ export function AdminConsole() {
     );
   }
 
-  const unread = unreadNotificationCount();
-  const notifications = listNotifications();
+  const unread = notes.filter((n) => !n.read).length;
+  const notifications = notes;
   const mode = hasFirebaseConfig() && getConsoleMode() === "live" ? "Live" : "Demo";
   const visiblePages = PAGES.filter((p) => PAGE_ACCESS[p.key].includes(role));
 
@@ -161,8 +177,8 @@ export function AdminConsole() {
               }`}>
               <Icon size={17} />
               {!collapsed && <span className="truncate">{label}</span>}
-              {!collapsed && key === "orders" && orders.filter((o) => o.status === "new").length > 0 && (
-                <span className="ml-auto grid h-5 min-w-[20px] place-items-center rounded-full bg-ember-400 px-1 font-mono text-[9px] font-bold text-forest-950">{orders.filter((o) => o.status === "new").length}</span>
+              {!collapsed && key === "orders" && searchIndex.orders.filter((o) => o.status === "new").length > 0 && (
+                <span className="ml-auto grid h-5 min-w-[20px] place-items-center rounded-full bg-ember-400 px-1 font-mono text-[9px] font-bold text-forest-950">{searchIndex.orders.filter((o) => o.status === "new").length}</span>
               )}
             </button>
           ))}
@@ -249,7 +265,7 @@ export function AdminConsole() {
                     className="absolute right-0 top-full z-40 mt-2 w-[320px] overflow-hidden rounded-xl border border-forest-700 bg-forest-900 shadow-[0_24px_60px_rgba(0,0,0,0.55)]">
                     <div className="flex items-center justify-between border-b border-forest-800 px-4 py-3">
                       <p className="font-mono text-[9.5px] uppercase tracking-[0.2em] text-gold-400">Notifications</p>
-                      <button onClick={() => { markAllNotificationsRead(); refresh(); }} className="font-mono text-[8.5px] uppercase tracking-[0.14em] text-sand-200/45 hover:text-gold-300">Mark all read</button>
+                      <button onClick={() => { void markAllReadF(); refresh(); }} className="font-mono text-[8.5px] uppercase tracking-[0.14em] text-sand-200/45 hover:text-gold-300">Mark all read</button>
                     </div>
                     <div className="max-h-[320px] overflow-y-auto">
                       {notifications.length === 0 && <p className="px-4 py-6 text-center text-[12.5px] text-sand-200/45">All quiet.</p>}
@@ -293,14 +309,14 @@ export function AdminConsole() {
         {/* page */}
         <main className="flex-1 px-4 py-7 lg:px-7">
           <motion.div key={page} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-            {page === "home" && <HomePage role={role} refresh={refresh} goTo={goTo} />}
-            {page === "orders" && <OrdersPage role={role} refresh={refresh} />}
-            {page === "products" && <ProductsPage role={role} refresh={refresh} />}
-            {page === "customers" && <CustomersPage role={role} refresh={refresh} />}
+            {page === "home" && <HomePage role={role} refresh={refresh} goTo={goTo} tick={tick} />}
+            {page === "orders" && <OrdersPage role={role} refresh={refresh} tick={tick} />}
+            {page === "products" && <ProductsPage role={role} refresh={refresh} tick={tick} />}
+            {page === "customers" && <CustomersPage role={role} refresh={refresh} tick={tick} />}
             {page === "staff" && role === "superadmin" && <StaffPage role={role} refresh={refresh} />}
-            {page === "content" && <ContentPage role={role} refresh={refresh} />}
-            {page === "marketing" && <MarketingPage role={role} refresh={refresh} />}
-            {page === "analytics" && <AnalyticsPage />}
+            {page === "content" && <ContentPage role={role} refresh={refresh} tick={tick} />}
+            {page === "marketing" && <MarketingPage role={role} refresh={refresh} tick={tick} />}
+            {page === "analytics" && <AnalyticsPage tick={tick} />}
             {page === "settings" && role === "superadmin" && <SettingsPage role={role} refresh={refresh} />}
           </motion.div>
           <span className="hidden"><Person size={0} /><Send size={0} /></span>
@@ -312,9 +328,22 @@ export function AdminConsole() {
 
 /* ---------------------------------- home ------------------------------------ */
 
-function HomePage({ role, refresh, goTo }: { role: CRole; refresh: () => void; goTo: (p: Page) => void }) {
-  const { orders, products, allArticles } = useApp();
-  const customers = useMemo(() => listCustomersWithStats(), [orders.length]);
+function HomePage({ role, refresh, goTo, tick }: { role: CRole; refresh: () => void; goTo: (p: Page) => void; tick: number }) {
+  /* all home figures come through the facade — Demo or Firestore, same code path */
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [customers, setCustomers] = useState<CustomerRow[]>([]);
+  const [posts, setPosts] = useState<Article[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState(false);
+  useEffect(() => {
+    let on = true;
+    setLoading(true); setErr(false);
+    Promise.all([loadOrders(), loadProducts(), loadCustomers(), loadPosts()])
+      .then(([o, p, c, a]) => { if (on) { setOrders(o); setProducts(p); setCustomers(c); setPosts(a); setLoading(false); } })
+      .catch(() => { if (on) { setErr(true); setLoading(false); } });
+    return () => { on = false; };
+  }, [tick]);
 
   const today = new Date().toISOString().slice(0, 10);
   const month = today.slice(0, 7);
@@ -323,7 +352,7 @@ function HomePage({ role, refresh, goTo }: { role: CRole; refresh: () => void; g
   const newOrders = orders.filter((o) => o.status === "new").length;
   const lowStock = products.filter((p) => p.stock < 5).length;
   const newCustomers = customers.filter((c) => Date.now() - new Date(c.createdAt).getTime() < 30 * 86400e3).length;
-  const pendingReviews = allArticles.filter((a) => a.status === "review").length;
+  const pendingReviews = posts.filter((a) => a.status === "review").length;
 
   const attention: { label: string; page: Page; tone: "ember" | "gold" | "moss" }[] = [
     ...(newOrders > 0 ? [{ label: `${newOrders} new order${newOrders > 1 ? "s" : ""} to pack`, page: "orders" as Page, tone: "ember" as const }] : []),
@@ -405,20 +434,21 @@ function HomePage({ role, refresh, goTo }: { role: CRole; refresh: () => void; g
 
 /* ---------------------------------- orders ----------------------------------- */
 
-function OrdersPage({ role, refresh }: { role: CRole; refresh: () => void }) {
-  const { logActivity, toast } = useApp();
+function OrdersPage({ role, refresh, tick }: { role: CRole; refresh: () => void; tick: number }) {
+  const { toast } = useApp();
   const [rows, setRows] = useState<Order[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [tick, setTick] = useState(0);
+  const [rtick, setRtick] = useState(0);
   const [status, setStatus] = useState<"all" | OrderStatus>("all");
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<"newest" | "oldest" | "value">("newest");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [openId, setOpenId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const actor = auth.session()?.name ?? "Admin";
 
   /* orders come from the mode-aware facade — Firestore in Live, demo otherwise */
-  const reload = useCallback(() => setTick((x) => x + 1), []);
+  const reload = useCallback(() => setRtick((x) => x + 1), []);
   useEffect(() => {
     let on = true;
     setErr(null);
@@ -426,7 +456,7 @@ function OrdersPage({ role, refresh }: { role: CRole; refresh: () => void }) {
       .then((o) => { if (on) setRows(o); })
       .catch(() => { if (on) { setRows(null); setErr("Orders couldn't be read from the database. Nothing was changed — retry when ready."); } });
     return () => { on = false; };
-  }, [tick]);
+  }, [rtick, tick]);
 
   const orders = rows ?? [];
 
@@ -448,7 +478,7 @@ function OrdersPage({ role, refresh }: { role: CRole; refresh: () => void }) {
     setBusy(true);
     try {
       await advanceOrderStatus(o.id, next);
-      logActivity("store", `moved order ${o.id} to ${ORDER_META[next].label}`, o.id);
+      void logActivity(actor, "store", `moved order ${o.id} to ${ORDER_META[next].label}`, o.id);
       await pushNotificationF({ title: `Order ${o.id} → ${ORDER_META[next].label}`, body: `${o.customer.name}'s order moved forward.`, icon: "order" });
       toast(`Order ${o.id} → ${ORDER_META[next].label}`);
     } catch { toast("Couldn't update that order — try again"); }
@@ -460,7 +490,7 @@ function OrdersPage({ role, refresh }: { role: CRole; refresh: () => void }) {
     setBusy(true);
     try {
       const n = await bulkShipOrders([...selected]);
-      logActivity("store", `marked ${n} orders as shipped`);
+      void logActivity(actor, "store", `marked ${n} orders as shipped`);
       toast(`${n} order${n === 1 ? "" : "s"} marked shipped`);
       setSelected(new Set());
     } catch { toast("Bulk update failed — nothing was changed"); }
@@ -472,7 +502,7 @@ function OrdersPage({ role, refresh }: { role: CRole; refresh: () => void }) {
     setBusy(true);
     try {
       await cancelOrderRestock(id);
-      logActivity("store", `cancelled order ${id} & restocked`, id);
+      void logActivity(actor, "store", `cancelled order ${id} & restocked`, id);
       toast(`Order ${id} cancelled — stock returned`);
     } catch { toast("Couldn't cancel that order — try again"); }
     setBusy(false);
@@ -638,8 +668,8 @@ function OrdersPage({ role, refresh }: { role: CRole; refresh: () => void }) {
                       <Send size={14} /> Mark as {ORDER_META[ORDER_FLOW[ORDER_FLOW.indexOf(open.status) + 1]].label}
                     </button>
                   )}
-                  <button onClick={() => { cancelAndRestock(open.id); logActivity("store", `cancelled order ${open.id} & restocked`, open.id); toast(`Order ${open.id} cancelled — stock returned`); setOpenId(null); refresh(); }}
-                    className="flex w-full items-center justify-center gap-2 rounded-full border border-ember-500/50 py-3 font-mono text-[10.5px] uppercase tracking-[0.16em] text-ember-300 hover:bg-ember-500/10">
+                  <button onClick={() => cancelOrder(open.id)} disabled={busy}
+                    className="flex w-full items-center justify-center gap-2 rounded-full border border-ember-500/50 py-3 font-mono text-[10.5px] uppercase tracking-[0.16em] text-ember-300 hover:bg-ember-500/10 disabled:opacity-50">
                     <Trash size={14} /> Cancel & restock
                   </button>
                 </div>
@@ -659,13 +689,30 @@ function OrdersPage({ role, refresh }: { role: CRole; refresh: () => void }) {
 
 const PRODUCT_CATS = ["All", "Oils", "Churnas", "Capsules", "Ghritas", "Kadhas"] as const;
 
-function ProductsPage({ role, refresh }: { role: CRole; refresh: () => void }) {
-  const { products, saveProduct, logActivity, toast } = useApp();
+function ProductsPage({ role, refresh, tick }: { role: CRole; refresh: () => void; tick: number }) {
+  const { toast } = useApp();
+  const [rows, setRows] = useState<Product[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [rtick, setRtick] = useState(0);
   const [view, setView] = useState<"cards" | "table">("cards");
   const [cat, setCat] = useState<(typeof PRODUCT_CATS)[number]>("All");
   const [q, setQ] = useState("");
   const [editing, setEditing] = useState<Product | null>(null);
   const canEdit = role !== "viewer";
+  const actor = auth.session()?.name ?? "Admin";
+
+  /* products come from the mode-aware facade — Firestore in Live, demo otherwise */
+  const reload = useCallback(() => setRtick((x) => x + 1), []);
+  useEffect(() => {
+    let on = true;
+    setErr(null);
+    loadProducts()
+      .then((p) => { if (on) setRows(p); })
+      .catch(() => { if (on) { setRows(null); setErr("Products couldn't be read from the database. Nothing was changed — retry when ready."); } });
+    return () => { on = false; };
+  }, [rtick, tick]);
+
+  const products = rows ?? [];
 
   const list = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -680,10 +727,14 @@ function ProductsPage({ role, refresh }: { role: CRole; refresh: () => void }) {
     toast("Products exported as CSV");
   };
 
-  const quickStock = (p: Product, stock: number) => {
-    saveProduct({ ...p, stock: Math.max(0, stock) });
-    if (stock < 5) pushNotification({ title: `Low stock — ${p.name}`, body: `Only ${stock} unit${stock === 1 ? "" : "s"} left.`, icon: "stock" });
-    refresh();
+  const quickStock = async (p: Product, stock: number) => {
+    const next = Math.max(0, stock);
+    try {
+      await saveProductF({ ...p, stock: next });
+      if (next < 5) await pushNotificationF({ title: `Low stock — ${p.name}`, body: `Only ${next} unit${next === 1 ? "" : "s"} left.`, icon: "stock" });
+      toast(`${p.name} stock set to ${next}`);
+    } catch { toast("Couldn't update stock — try again"); }
+    reload(); refresh();
   };
 
   return (
@@ -731,7 +782,7 @@ function ProductsPage({ role, refresh }: { role: CRole; refresh: () => void }) {
                   </div>
                   {canEdit && (
                     <div className="flex flex-col items-end gap-2">
-                      <Switch on={p.visible !== false} label="" desc="" onChange={(b) => { saveProduct({ ...p, visible: b }); logActivity("store", b ? `showed "${p.name}"` : `hid "${p.name}"`, p.name); toast(b ? `${p.name} visible` : `${p.name} hidden`); refresh(); }} />
+                      <Switch on={p.visible !== false} label="" desc="" onChange={async (b) => { try { await saveProductF({ ...p, visible: b }); void logActivity(actor, "store", b ? `showed "${p.name}"` : `hid "${p.name}"`, p.name); toast(b ? `${p.name} visible` : `${p.name} hidden`); } catch { toast("Couldn't update visibility — try again"); } reload(); refresh(); }} />
                       <button onClick={() => setEditing(p)} className="rounded-full border border-forest-700 px-4 py-1.5 font-mono text-[9px] uppercase tracking-[0.12em] text-sand-200/70 hover:border-gold-400 hover:text-gold-300">Edit</button>
                     </div>
                   )}
@@ -769,7 +820,7 @@ function ProductsPage({ role, refresh }: { role: CRole; refresh: () => void }) {
 
       {editing && canEdit && (
         <ProductEditor product={editing} isNew={!products.some((x) => x.id === editing.id)} onClose={() => setEditing(null)}
-          onSave={(p) => { saveProduct(p); logActivity("store", `saved product "${p.name}"`, p.name); toast(`${p.name} saved`); setEditing(null); refresh(); }} />
+          onSave={async (p) => { try { await saveProductF(p); void logActivity(actor, "store", `saved product "${p.name}"`, p.name); toast(`${p.name} saved`); setEditing(null); } catch { toast("Couldn't save the product — try again"); } reload(); refresh(); }} />
       )}
     </div>
   );
