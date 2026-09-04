@@ -1,11 +1,18 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useApp, auth, SmartImg, type StudioUser } from "./lib";
 import { BRAND_LOGO_URL, PRODUCTS, ORDER_META, ORDER_FLOW, formatDate, type Order, type OrderStatus, type Product } from "./data";
 import {
-  getConsoleMode, hasFirebaseConfig, listNotifications, markAllNotificationsRead, pushNotification,
-  seedDemoAnalytics, unreadNotificationCount, listCustomersWithStats, listDiscounts, saveDiscount,
+  getConsoleMode, hasFirebaseConfig, seedDemoAnalytics,
 } from "./console/db";
+import {
+  loadOrders, advanceOrderStatus, cancelOrderRestock, bulkShipOrders,
+  loadProducts, saveProductF, deleteProductF,
+  listNotificationsF, markAllReadF, pushNotificationF, loadSearchIndex, type SearchIndex,
+  loadDiscountsF, saveDiscountF, loadCustomers, loadPosts, loadActivity, type ActivityRecord, type CustomerRow,
+} from "./console/data";
+import type { Article } from "./data";
+import { EmptyState, ErrorState, ListSkeleton, Skeleton } from "./console/ui";
 import {
   CustomersPage, StaffPage, ContentPage, MarketingPage, AnalyticsPage, SettingsPage,
   Switch, downloadFile, cInp, cLbl, timeAgo, type CRole,
@@ -60,15 +67,19 @@ export function AdminConsole() {
 
   /* seed demo analytics, a welcome notification and a starter discount once */
   useEffect(() => {
-    try {
-      seedDemoAnalytics();
-      if (listNotifications().length === 0) {
-        pushNotification({ title: "Welcome to the Admin Console", body: "Everything here edits the live site — changes save instantly.", icon: "system" });
-      }
-      if (listDiscounts().length === 0) {
-        saveDiscount({ id: "d-welcome", code: "WELCOME10", type: "percent", value: 10, minOrder: 499, expires: "", active: true, createdAt: new Date().toISOString().slice(0, 10) });
-      }
-    } catch { /* ignore */ }
+    (async () => {
+      try {
+        seedDemoAnalytics();
+        const notifs = await listNotificationsF();
+        if (notifs.length === 0) {
+          await pushNotificationF({ title: "Welcome to the Admin Console", body: "Everything here edits the live site — changes save instantly.", icon: "system" });
+        }
+        const discounts = await loadDiscountsF();
+        if (discounts.length === 0) {
+          await saveDiscountF({ id: "d-welcome", code: "WELCOME10", type: "percent", value: 10, minOrder: 499, expires: "", active: true, createdAt: new Date().toISOString().slice(0, 10) });
+        }
+      } catch { /* seeding must never crash the console */ }
+    })();
   }, []);
 
   const me = session ? auth.get(session.id) ?? session : null;
@@ -395,12 +406,29 @@ function HomePage({ role, refresh, goTo }: { role: CRole; refresh: () => void; g
 /* ---------------------------------- orders ----------------------------------- */
 
 function OrdersPage({ role, refresh }: { role: CRole; refresh: () => void }) {
-  const { orders, updateOrderStatus, cancelAndRestock, logActivity, toast } = useApp();
+  const { logActivity, toast } = useApp();
+  const [rows, setRows] = useState<Order[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [tick, setTick] = useState(0);
   const [status, setStatus] = useState<"all" | OrderStatus>("all");
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<"newest" | "oldest" | "value">("newest");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [openId, setOpenId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  /* orders come from the mode-aware facade — Firestore in Live, demo otherwise */
+  const reload = useCallback(() => setTick((x) => x + 1), []);
+  useEffect(() => {
+    let on = true;
+    setErr(null);
+    loadOrders()
+      .then((o) => { if (on) setRows(o); })
+      .catch(() => { if (on) { setRows(null); setErr("Orders couldn't be read from the database. Nothing was changed — retry when ready."); } });
+    return () => { on = false; };
+  }, [tick]);
+
+  const orders = rows ?? [];
 
   const list = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -413,24 +441,43 @@ function OrdersPage({ role, refresh }: { role: CRole; refresh: () => void }) {
   const open = orders.find((o) => o.id === openId) ?? null;
   const canEdit = role !== "viewer";
 
-  const advance = (o: Order) => {
+  const advance = async (o: Order) => {
     const i = ORDER_FLOW.indexOf(o.status);
     const next = ORDER_FLOW[i + 1];
     if (!next) return;
-    updateOrderStatus(o.id, next);
-    logActivity("store", `moved order ${o.id} to ${ORDER_META[next].label}`, o.id);
-    pushNotification({ title: `Order ${o.id} → ${ORDER_META[next].label}`, body: `${o.customer.name}'s order moved forward.`, icon: "order" });
-    toast(`Order ${o.id} → ${ORDER_META[next].label}`);
-    refresh();
+    setBusy(true);
+    try {
+      await advanceOrderStatus(o.id, next);
+      logActivity("store", `moved order ${o.id} to ${ORDER_META[next].label}`, o.id);
+      await pushNotificationF({ title: `Order ${o.id} → ${ORDER_META[next].label}`, body: `${o.customer.name}'s order moved forward.`, icon: "order" });
+      toast(`Order ${o.id} → ${ORDER_META[next].label}`);
+    } catch { toast("Couldn't update that order — try again"); }
+    setBusy(false);
+    reload(); refresh();
   };
 
-  const bulkShip = () => {
-    const targets = orders.filter((o) => selected.has(o.id) && (o.status === "new" || o.status === "processing"));
-    targets.forEach((o) => updateOrderStatus(o.id, "shipped"));
-    logActivity("store", `marked ${targets.length} orders as shipped`);
-    toast(`${targets.length} order${targets.length === 1 ? "" : "s"} marked shipped`);
-    setSelected(new Set());
-    refresh();
+  const bulkShip = async () => {
+    setBusy(true);
+    try {
+      const n = await bulkShipOrders([...selected]);
+      logActivity("store", `marked ${n} orders as shipped`);
+      toast(`${n} order${n === 1 ? "" : "s"} marked shipped`);
+      setSelected(new Set());
+    } catch { toast("Bulk update failed — nothing was changed"); }
+    setBusy(false);
+    reload(); refresh();
+  };
+
+  const cancelOrder = async (id: string) => {
+    setBusy(true);
+    try {
+      await cancelOrderRestock(id);
+      logActivity("store", `cancelled order ${id} & restocked`, id);
+      toast(`Order ${id} cancelled — stock returned`);
+    } catch { toast("Couldn't cancel that order — try again"); }
+    setBusy(false);
+    setOpenId(null);
+    reload(); refresh();
   };
 
   const toggleSel = (id: string) => {

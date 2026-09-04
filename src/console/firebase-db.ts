@@ -151,6 +151,26 @@ export async function listHerbs(): Promise<Record<string, unknown>[]> { return r
 export async function saveProduct(id: string, data: Record<string, unknown>): Promise<boolean> { return writeDoc("products", id, data); }
 export async function savePost(id: string, data: Record<string, unknown>): Promise<boolean> { return writeDoc("posts", id, data); }
 export async function saveHerb(id: string, data: Record<string, unknown>): Promise<boolean> { return writeDoc("herbs", id, data); }
+export async function saveOrder(id: string, data: Record<string, unknown>): Promise<boolean> { return writeDoc("orders", id, data); }
+export async function saveCustomer(id: string, patch: Record<string, unknown>): Promise<boolean> { return writeDoc("customers", id, patch); }
+export async function deleteProductDoc(id: string): Promise<boolean> { return removeDoc("products", id); }
+export async function deletePostDoc(id: string): Promise<boolean> { return removeDoc("posts", id); }
+export async function deleteHerbDoc(id: string): Promise<boolean> { return removeDoc("herbs", id); }
+
+/* ------------------------------ site flags ---------------------------------- */
+
+export async function getSiteFlags(): Promise<{ storeEnabled?: boolean; profileTab?: boolean } | null> {
+  const db = await getDb();
+  if (!db) return null;
+  try {
+    const { doc, getDoc } = await import("firebase/firestore");
+    const snap = await getDoc(doc(db, "settings", "siteFlags"));
+    return snap.exists() ? (snap.data() as { storeEnabled?: boolean; profileTab?: boolean }) : null;
+  } catch {
+    return null;
+  }
+}
+export async function saveSiteFlags(patch: Record<string, unknown>): Promise<boolean> { return writeDoc("settings", "siteFlags", patch); }
 
 /* --------------------------------- discounts -------------------------------- */
 
