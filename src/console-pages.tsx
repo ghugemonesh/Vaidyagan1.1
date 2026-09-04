@@ -185,7 +185,14 @@ export function CustomersPage({ role, refresh, tick }: PageProps) {
             {role !== "viewer" && (
               <div className="mt-5">
                 <Switch on={!open.suspended} label={open.suspended ? "Account suspended" : "Account active"} desc={open.suspended ? "They cannot sign in right now. Reactivate to restore access." : "Suspend to block sign-in (orders stay recorded)."}
-                  onChange={(b) => { if (updateCustomerFlags(open.id, { suspended: !b })) { toast(b ? `${open.name} reactivated` : `${open.name} suspended`); force((x) => x + 1); } }} />
+                  onChange={async (b) => {
+                    try {
+                      await updateCustomerFlagsF(open.id, { suspended: !b });
+                      toast(b ? `${open.name} reactivated` : `${open.name} suspended`);
+                      setOpenId(null);
+                      reload();
+                    } catch { toast("Couldn't update the account — try again"); }
+                  }} />
               </div>
             )}
             <div className="mt-5">
