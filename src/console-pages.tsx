@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { useApp, auth, readImageFile, SmartImg, type StudioUser } from "./lib";
 import {
@@ -14,6 +14,9 @@ import {
   exportAllData, SITE_KEYS, toggleHiddenReview, listHiddenReviews,
 } from "./console/db";
 import { HerbManager } from "./herbs-admin";
+import {
+  loadStaff, saveStaffRole, saveStaffAccess, inviteStaff, seedFounder as seedFounderDoc, type StaffRecord,
+} from "./console/data";
 import {
   Check, Close, Plus, Trash, Download, Upload, Search, Star, Shield, Lock, Users, Eye, Clock, Key, Bell,
 } from "./icons";
@@ -208,20 +211,43 @@ export function CustomersPage({ role }: PageProps) {
 
 export function StaffPage({ refresh }: PageProps) {
   const { toast, logActivity } = useApp();
-  const [, force] = useState(0);
-  const users = auth.list();
+  const [users, setUsers] = useState<StaffRecord[]>([]);
+  const [loading, setLoading] = useState(true);
   const [invite, setInvite] = useState({ name: "", email: "", role: "editor" as "editor" | "viewer" });
 
-  const sendInvite = () => {
+  const reload = () => {
+    setLoading(true);
+    loadStaff()
+      .then((u) => setUsers(u))
+      .catch(() => setUsers([]))
+      .finally(() => setLoading(false));
+  };
+  useEffect(() => { reload(); }, []);
+
+  const sendInvite = async () => {
     if (!invite.name.trim() || !invite.email.trim()) { toast("Name and email are required"); return; }
     const username = invite.email.split("@")[0].replace(/[^a-z0-9]/gi, "").toLowerCase() || `user${Date.now() % 1000}`;
-    const res = auth.addMember({ name: invite.name.trim(), username, password: `vg-${Date.now().toString(36).slice(-6)}`, role: "doctor", specialty: "Invited from console", consoleAccess: true, consoleRole: invite.role });
-    if (!res.ok) { toast(res.error ?? "Could not invite"); return; }
-    logActivity("member", `invited ${res.user!.name} to the console as ${invite.role}`);
-    toast(`${res.user!.name} invited — temporary username "${username}"`);
+    const created = await inviteStaff({
+      name: invite.name.trim(), username,
+      password: `vg-${Date.now().toString(36).slice(-6)}`,
+      role: invite.role, specialty: "Invited from console",
+    });
+    if (!created) { toast("Could not invite — that username may be taken"); return; }
+    logActivity("member", `invited ${created.name} to the console as ${invite.role}`);
+    toast(`${created.name} invited — temporary username "${username}"`);
     setInvite({ name: "", email: "", role: "editor" });
-    force((x) => x + 1); refresh();
+    reload(); refresh();
   };
+
+  if (loading) {
+    return (
+      <div className="space-y-3">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="shimmer h-[76px] rounded-xl border border-forest-800 bg-forest-900/60" />
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5">
@@ -259,7 +285,7 @@ export function StaffPage({ refresh }: PageProps) {
               </div>
               {!isSuper && (
                 <select value={u.consoleRole} aria-label={`Console role for ${u.name}`}
-                  onChange={(e) => { auth.setPerms(u.id, { consoleRole: e.target.value as "editor" | "viewer" }); logActivity("member", `made ${u.name} a console ${e.target.value}`); toast(`${u.name} is now a console ${e.target.value}`); force((x) => x + 1); refresh(); }}
+                  onChange={(e) => { const r = e.target.value as "editor" | "viewer"; saveStaffRole(u.id, r); logActivity("member", `made ${u.name} a console ${r}`); toast(`${u.name} is now a console ${r}`); reload(); refresh(); }}
                   className="rounded-lg border border-forest-700 bg-forest-950/70 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-sand-200/75 focus:border-gold-400 focus:outline-none">
                   <option value="editor">Editor · can change things</option>
                   <option value="viewer">Viewer · read-only</option>
@@ -270,10 +296,10 @@ export function StaffPage({ refresh }: PageProps) {
                 <Switch on={hasAccess} disabled={isSuper || u.id === auth.session()?.id} label="" desc=""
                   onChange={(b) => {
                     if (u.id === auth.session()?.id) { toast("You can't revoke your own dashboard access"); return; }
-                    auth.setPerms(u.id, { consoleAccess: b });
+                    saveStaffAccess(u.id, b);
                     logActivity("member", b ? `granted console access to ${u.name}` : `revoked console access from ${u.name}`);
                     toast(b ? `${u.name} can open the console` : `${u.name} locked out of the console`);
-                    force((x) => x + 1); refresh();
+                    reload(); refresh();
                   }} />
               </div>
             </div>
@@ -787,6 +813,15 @@ export function SettingsPage({ refresh }: PageProps) {
               </button>
               <button onClick={() => { clearFirebaseConfig(); setCfg({ apiKey: "", authDomain: "", projectId: "", storageBucket: "", messagingSenderId: "", appId: "" }); setTestState("idle"); toast("Config cleared"); refresh(); }}
                 className="rounded-full border border-forest-700 px-6 py-3 font-mono text-[10.5px] uppercase tracking-[0.16em] text-sand-200/55 hover:border-ember-400 hover:text-ember-300">Clear</button>
+              <button onClick={async () => {
+                const ok = await seedFounderDoc();
+                toast(ok ? "Founder document seeded — admin_users / root is now a superadmin." : "Couldn't seed the founder — check the connection.");
+                if (ok) logActivity("edit", "seeded the Firestore founder document");
+              }}
+                className="rounded-full border border-gold-500/50 px-6 py-3 font-mono text-[10.5px] uppercase tracking-[0.16em] text-gold-300 hover:bg-gold-400/10"
+                title="Creates the admin_users / root superadmin document in Firestore">
+                <Shield size={13} className="mr-1.5 inline" />Seed founder doc
+              </button>
             </>
           )}
           <button onClick={() => setShowWizard(!showWizard)} className="ml-auto flex items-center gap-2 rounded-full border border-forest-700 px-5 py-3 font-mono text-[10px] uppercase tracking-[0.16em] text-sand-200/60 hover:text-gold-300">

@@ -10,6 +10,7 @@ import {
   CustomersPage, StaffPage, ContentPage, MarketingPage, AnalyticsPage, SettingsPage,
   Switch, downloadFile, cInp, cLbl, timeAgo, type CRole,
 } from "./console-pages";
+import { loadActivity } from "./console/data";
 import {
   Leaf, Gear, Cart, Users, Book, Mortar, Star, Search, Close, Check, Plus, Trash, Download,
   Shield, Lock, Eye, ChevronDown, Activity, Bell, Menu, LayoutGrid, Person, Send,
@@ -320,11 +321,13 @@ function HomePage({ role, refresh, goTo }: { role: CRole; refresh: () => void; g
     ...(newCustomers > 0 ? [{ label: `${newCustomers} new customer${newCustomers > 1 ? "s" : ""} this month`, page: "customers" as Page, tone: "moss" as const }] : []),
   ];
 
-  const activity = useMemo(() => {
-    try {
-      const raw = localStorage.getItem("vaidyagan_activity_v1");
-      return raw ? (JSON.parse(raw) as { id: string; actor: string; action: string; at: string }[]).slice(0, 10) : [];
-    } catch { return []; }
+  const [activity, setActivity] = useState<{ id: string; actor: string; action: string; at: string }[]>([]);
+  useEffect(() => {
+    let on = true;
+    loadActivity()
+      .then((a) => { if (on) setActivity(a.slice(0, 10) as { id: string; actor: string; action: string; at: string }[]); })
+      .catch(() => { if (on) setActivity([]); });
+    return () => { on = false; };
   }, [orders.length, products.length]);
 
   const kpis: { label: string; value: string; sub: string; Icon: React.ComponentType<{ size?: number; className?: string }> }[] = [
