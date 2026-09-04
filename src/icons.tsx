@@ -192,6 +192,12 @@ export const Lock = (p: IconProps) => (
 export const Key = (p: IconProps) => (
   <svg {...base(p)}><circle cx="8" cy="12" r="4" /><path d="M12 12h8.5M18 12v3M15.5 12v2.2" /></svg>
 );
+export const Bell = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M6 16v-5a6 6 0 1 1 12 0v5l1.5 2.5h-15L6 16Z" />
+    <path d="M10 21a2 2 0 0 0 4 0" />
+  </svg>
+);
 export const Gear = (p: IconProps) => (
   <svg {...base(p)}>
     <circle cx="12" cy="12" r="3.2" />

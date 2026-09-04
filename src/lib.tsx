@@ -3,7 +3,7 @@ import {
   ARTICLES, HERBS, PRODUCTS, SEED_ORDERS,
   type Article, type Dosha, type Herb, type Order, type OrderCustomer, type OrderStatus, type Product,
 } from "./data";
-import { pushNotification } from "./console/db";
+import { pushNotification, trackPageView } from "./console/db";
 
 /* ----------------------------------- views ---------------------------------- */
 
@@ -369,6 +369,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const navigate = useCallback((v: View) => {
     setView(v);
     window.scrollTo({ top: 0, behavior: "auto" });
+    try { trackPageView(v.name); } catch { /* tracking must never break navigation */ }
   }, []);
 
   const toast = useCallback((msg: string) => {

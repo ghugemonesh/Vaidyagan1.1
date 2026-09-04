@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useApp, Monogram, SmartImg, type View } from "./lib";
 import { AUTHORS, BRAND_LOGO_URL, FREE_SHIP_AT, type Order } from "./data";
+import { validateDiscount } from "./console/db";
 import {
   Leaf, Cart, Menu, Close, Instagram, Plus, Minus, Trash, ArrowRight, Check, Lock, SealCheck,
   Person, Phone, Send, ArrowLeft,
@@ -319,8 +320,22 @@ function CheckoutFlow({ subtotal, onDone }: { subtotal: number; onDone: () => vo
     };
   });
 
+  /* promo codes — validated live against the console's Marketing list */
+  const [promo, setPromo] = useState("");
+  const [promoState, setPromoState] = useState<{ ok: true; code: string; amount: number } | { ok: false; reason: string } | null>(null);
+  const applyPromo = () => {
+    try {
+      const res = validateDiscount(promo, subtotal);
+      setPromoState(res.ok ? { ok: true, code: res.discount.code, amount: res.amount } : { ok: false, reason: res.reason });
+    } catch {
+      setPromoState({ ok: false, reason: "Couldn't check that code — try again." });
+    }
+  };
+  const applied = promoState?.ok ? promoState : null;
+  const grandTotal = Math.max(0, subtotal - (applied?.amount ?? 0));
+
   const finish = () => {
-    const order = placeOrder(form, pay); // creates order + auto-deducts stock + clears basket
+    const order = placeOrder(form, pay, applied ? { code: applied.code, amount: applied.amount } : undefined); // creates order + auto-deducts stock + clears basket
     if (customer && saveAddr && form.address.trim()) {
       saveAddress({
         id: `addr-${Date.now()}`, label: "Home", name: form.name, phone: form.phone,
@@ -384,10 +399,31 @@ function CheckoutFlow({ subtotal, onDone }: { subtotal: number; onDone: () => vo
         )}
         {step === 1 && (
           <div>
+            {/* promo code */}
+            <div className="mb-4 rounded-xl border border-forest-800 bg-forest-850/60 p-4">
+              <label className="mb-1.5 block font-mono text-[9px] uppercase tracking-[0.2em] text-gold-400/80">Discount code</label>
+              <div className="flex gap-2">
+                <input value={promo} onChange={(e) => { setPromo(e.target.value.toUpperCase()); setPromoState(null); }} placeholder="e.g. WELCOME10"
+                  className="w-full rounded-lg border border-forest-700 bg-forest-950/60 px-3.5 py-2.5 font-mono text-sm tracking-[0.12em] text-sand-100 placeholder:text-sand-200/30 focus:border-gold-400 focus:outline-none" />
+                <button onClick={applyPromo} disabled={!promo.trim()} className="shrink-0 rounded-lg border border-gold-500/50 px-4 font-mono text-[10px] uppercase tracking-[0.14em] text-gold-300 transition-all hover:bg-gold-400 hover:text-forest-950 disabled:opacity-35">Apply</button>
+              </div>
+              {promoState && !promoState.ok && <p className="mt-2 text-[11.5px] text-ember-300">{promoState.reason}</p>}
+              {applied && <p className="mt-2 flex items-center gap-1.5 text-[11.5px] text-kapha-300"><Check size={12} /> {applied.code} applied — you save ₹{applied.amount.toLocaleString("en-IN")}.</p>}
+            </div>
             <div className="rounded-xl border border-forest-800 bg-forest-850/60 p-5">
               <div className="flex items-center justify-between">
-                <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-sand-200/60">Order total</span>
-                <span className="font-display text-2xl font-semibold text-sand-100">₹{subtotal.toLocaleString("en-IN")}</span>
+                <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-sand-200/60">Subtotal</span>
+                <span className="font-mono text-sm text-sand-200/80">₹{subtotal.toLocaleString("en-IN")}</span>
+              </div>
+              {applied && (
+                <div className="mt-1.5 flex items-center justify-between">
+                  <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-kapha-300">Discount · {applied.code}</span>
+                  <span className="font-mono text-sm text-kapha-300">− ₹{applied.amount.toLocaleString("en-IN")}</span>
+                </div>
+              )}
+              <div className="mt-2 flex items-center justify-between border-t border-forest-800 pt-2">
+                <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-sand-200/60">To pay</span>
+                <span className="font-display text-2xl font-semibold text-sand-100">₹{grandTotal.toLocaleString("en-IN")}</span>
               </div>
               <p className="mt-2 text-xs leading-relaxed text-sand-200/50">
                 Demo checkout — no money moves. In production this step opens Razorpay (UPI, cards, net-banking).
@@ -405,7 +441,7 @@ function CheckoutFlow({ subtotal, onDone }: { subtotal: number; onDone: () => vo
               onClick={finish}
               className="mt-6 w-full rounded-full bg-gold-400 py-3.5 font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-forest-950 transition-all hover:bg-gold-300"
             >
-              Place order · ₹{subtotal.toLocaleString("en-IN")}
+              Confirm & place order · ₹{grandTotal.toLocaleString("en-IN")}
             </button>
           </div>
         )}
