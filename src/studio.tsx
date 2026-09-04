@@ -382,6 +382,10 @@ export function Studio() {
 
   const [tab, setTab] = useState<StudioTab>("essays");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /** Type for the NEXT draft — picking Blog/Case/Research alone never creates anything. */
+  const [draftKind, setDraftKind] = useState<Kind>("blog");
+  /** Two-tap delete arming for the left article list. */
+  const [armedDelete, setArmedDelete] = useState<string | null>(null);
   const [hydrateNonce, setHydrateNonce] = useState(0);
 
   const [title, setTitle] = useState("");
@@ -810,32 +814,67 @@ export function Studio() {
           </div>
         ) : (
           /* ------------------------------ essays workspace ------------------------------ */
-          <div className={`grid gap-6 rounded-b-xl rounded-tr-xl border border-forest-800 bg-forest-900/40 p-4 lg:p-6 ${focus ? "lg:grid-cols-1" : "lg:grid-cols-[290px_1fr]"}`}>
+          <div className={`grid gap-6 rounded-b-xl rounded-tr-xl border border-forest-800 bg-forest-900/40 p-4 lg:p-6 ${focus ? "lg:grid-cols-1" : "lg:grid-cols-[290px_1fr] lg:grid-rows-[auto_minmax(0,1fr)]"}`}>
             {!focus && (
-              <aside className="flex max-h-[44vh] flex-col rounded-xl border border-forest-800 bg-forest-900/70 lg:col-start-1 lg:row-start-1 lg:max-h-[calc(100vh-220px)]">
-                <div className="flex items-center justify-between border-b border-forest-800 px-4 py-3.5">
+              <aside className="flex max-h-[44vh] flex-col rounded-xl border border-forest-800 bg-forest-900/70 lg:col-start-1 lg:row-start-2 lg:min-h-0 lg:max-h-[calc(100vh-220px)]">
+                <div className="flex items-center justify-between gap-2 border-b border-forest-800 px-4 py-3">
                   <p className="font-mono text-[9.5px] uppercase tracking-[0.2em] text-gold-400">{isSuper ? "All articles" : "Your articles"}</p>
+                  <button onClick={() => newDraft(draftKind)} title={`Start a new ${KIND_META[draftKind].label}`}
+                    className="flex items-center gap-1 rounded-full bg-gold-400 px-3 py-1.5 font-mono text-[8px] font-semibold uppercase tracking-[0.1em] text-forest-950 transition-all hover:bg-gold-300 active:scale-95">
+                    <Plus size={10} /> New
+                  </button>
+                </div>
+                {/* type for the next draft — selecting alone creates nothing */}
+                <div className="border-b border-forest-800 px-4 py-2.5">
+                  <p className="mb-1.5 font-mono text-[7.5px] uppercase tracking-[0.16em] text-sand-200/30">New draft type</p>
                   <div className="flex gap-1.5">
-                    <button onClick={() => newDraft("case")} title="New case paper" className="rounded-full border border-forest-700 px-2.5 py-1 font-mono text-[8px] uppercase tracking-[0.1em] text-sand-200/60 hover:border-ember-400 hover:text-ember-300">Case</button>
-                    <button onClick={() => newDraft("research")} title="New research review" className="rounded-full border border-forest-700 px-2.5 py-1 font-mono text-[8px] uppercase tracking-[0.1em] text-sand-200/60 hover:border-steel-400 hover:text-steel-300">Research</button>
-                    <button onClick={() => newDraft()} title="New blog" className="rounded-full bg-gold-400 px-2.5 py-1 font-mono text-[8px] font-semibold uppercase tracking-[0.1em] text-forest-950 hover:bg-gold-300"><Plus size={10} className="inline" /> Blog</button>
+                    {(["blog", "case", "research"] as Kind[]).map((k) => (
+                      <button key={k} onClick={() => setDraftKind(k)} aria-pressed={draftKind === k}
+                        title={`Next "New" draft will be a ${KIND_META[k].label}`}
+                        className={`flex-1 rounded-lg border py-1.5 font-mono text-[8px] uppercase tracking-[0.1em] transition-all ${draftKind === k ? "border-gold-400 bg-gold-400/12 text-gold-300" : "border-forest-700 text-sand-200/50 hover:border-forest-600 hover:text-sand-100"}`}>
+                        {KIND_META[k].short}
+                      </button>
+                    ))}
                   </div>
                 </div>
                 <button onClick={() => setImportOpen(true)} className="mx-3 mt-3 flex items-center justify-center gap-2 rounded-lg border border-dashed border-forest-600 py-2.5 font-mono text-[9px] uppercase tracking-[0.14em] text-sand-200/55 hover:border-gold-400 hover:text-gold-300">
                   <Download size={13} /> Import PDF / Word
                 </button>
                 <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
-                  {myArticles.map((p) => (
-                    <button key={p.id} onClick={() => openPost(p.id)}
-                      className={`block w-full rounded-lg border p-3 text-left transition-all ${selectedId === p.id ? "border-gold-500/60 bg-gold-400/8" : "border-forest-800 bg-forest-850/50 hover:border-forest-600"}`}>
-                      <div className="flex items-center gap-2">
-                        {statusPill(p.status)}
-                        <span className="ml-auto font-mono text-[8px] uppercase tracking-[0.1em] text-sand-200/35">{formatDate(p.date)}</span>
+                  {myArticles.map((p) => {
+                    const canDelete = isSuper || me?.canDeletePublished || p.status !== "published";
+                    return (
+                      <div key={p.id} className="group relative">
+                        <button onClick={() => openPost(p.id)}
+                          className={`block w-full rounded-lg border p-3 pr-8 text-left transition-all ${selectedId === p.id ? "border-gold-500/60 bg-gold-400/8" : "border-forest-800 bg-forest-850/50 hover:border-forest-600"}`}>
+                          <div className="flex items-center gap-2">
+                            {statusPill(p.status)}
+                            <span className="ml-auto font-mono text-[8px] uppercase tracking-[0.1em] text-sand-200/35">{formatDate(p.date)}</span>
+                          </div>
+                          <p className={`mt-1.5 truncate text-[13px] font-semibold ${selectedId === p.id ? "text-gold-300" : "text-sand-100"}`}>{p.title || "Untitled"}</p>
+                          {isSuper && <p className="mt-0.5 font-mono text-[8px] uppercase tracking-[0.12em] text-sand-200/35">by {authorFor(p).name}</p>}
+                        </button>
+                        {canDelete && (
+                          armedDelete === p.id ? (
+                            <button
+                              onClick={() => { setArmedDelete(null); onDelete(p.id); }}
+                              onMouseLeave={() => setArmedDelete(null)}
+                              className="absolute right-1.5 top-1.5 z-10 rounded-md bg-ember-400 px-1.5 py-1 font-mono text-[7.5px] font-bold uppercase tracking-[0.08em] text-forest-950 shadow-[0_4px_14px_rgba(201,100,48,0.4)]"
+                              title="Click again to confirm deletion">
+                              Sure?
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => { setArmedDelete(p.id); window.setTimeout(() => setArmedDelete((x) => (x === p.id ? null : x)), 3000); }}
+                              aria-label={`Delete ${p.title || "untitled article"}`} title="Delete article"
+                              className="absolute right-1.5 top-1.5 z-10 grid h-6 w-6 place-items-center rounded-md text-sand-200/30 transition-all hover:bg-ember-500/15 hover:text-ember-300 focus:opacity-100 lg:opacity-0 lg:group-hover:opacity-100">
+                              <Trash size={11} />
+                            </button>
+                          )
+                        )}
                       </div>
-                      <p className={`mt-1.5 truncate text-[13px] font-semibold ${selectedId === p.id ? "text-gold-300" : "text-sand-100"}`}>{p.title || "Untitled"}</p>
-                      {isSuper && <p className="mt-0.5 font-mono text-[8px] uppercase tracking-[0.12em] text-sand-200/35">by {authorFor(p).name}</p>}
-                    </button>
-                  ))}
+                    );
+                  })}
                   {myArticles.length === 0 && <p className="p-4 text-center text-[12px] text-sand-200/40">No posts yet — open a fresh draft.</p>}
                 </div>
               </aside>
@@ -943,9 +982,9 @@ export function Studio() {
               </div>
             </div>
 
-            {/* article settings — lives in the LEFT column, beneath the article list */}
+            {/* article settings — top of the LEFT column, beside the editor */}
             {!focus && (
-              <aside className="max-h-[46vh] space-y-5 overflow-y-auto rounded-xl border border-forest-800 bg-forest-900/70 p-5 lg:col-start-1 lg:row-start-2 lg:max-h-[calc(100vh-220px)]">
+              <aside className="max-h-[420px] space-y-5 overflow-y-auto rounded-xl border border-forest-800 bg-forest-900/70 p-5 lg:col-start-1 lg:row-start-1 lg:max-h-[46vh]">
                 <div className="flex items-center gap-2">
                   <Gear size={14} className="text-gold-400" />
                   <p className="font-mono text-[9.5px] uppercase tracking-[0.2em] text-gold-400">Article settings</p>
