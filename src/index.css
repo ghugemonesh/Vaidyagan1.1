@@ -32,6 +32,12 @@
   --color-kapha-300: #a9cfbf;
   --color-kapha-400: #82b39e;
   --color-kapha-500: #5f947e;
+  --color-ember-300: #f0a377;
+  --color-ember-400: #e07f49;
+  --color-ember-500: #c96430;
+  --color-steel-300: #b7cbde;
+  --color-steel-400: #93b1cf;
+  --color-steel-500: #6f92b6;
 }
 
 @keyframes spin-slow { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
@@ -88,6 +94,34 @@ body {
 
 .gold-rule { height: 1px; background: linear-gradient(90deg, transparent, var(--color-gold-500), transparent); }
 .duotone { filter: saturate(0.82) contrast(1.05); }
+
+/* fine engineering grid used as an ambient backdrop for the console surfaces */
+.ops-grid {
+  background-image:
+    linear-gradient(rgba(214, 180, 95, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(214, 180, 95, 0.04) 1px, transparent 1px);
+  background-size: 44px 44px;
+}
+
+@keyframes rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+.animate-rise { animation: rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
+@keyframes spin-fast-kf { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.animate-spin-fast { animation: spin-fast-kf 0.9s linear infinite; }
+@keyframes shimmer { from { background-position: -200% 0; } to { background-position: 200% 0; } }
+.shimmer {
+  background: linear-gradient(100deg, transparent 30%, rgba(232, 207, 139, 0.08) 50%, transparent 70%);
+  background-size: 200% 100%;
+  animation: shimmer 2.4s linear infinite;
+}
+
+/* GitHub-style reading progress line, rendered under the fixed site header */
+.scroll-progress {
+  position: fixed; top: 0; left: 0; z-index: 60; height: 2px;
+  background: linear-gradient(90deg, var(--color-gold-600), var(--color-gold-300));
+  box-shadow: 0 0 12px rgba(214, 180, 95, 0.55);
+  transform-origin: 0 50%;
+  transition: opacity 0.3s;
+}
 .tilt-3d { transform-style: preserve-3d; transition: transform 0.25s ease-out; }
 .tilt-inner { transform: translateZ(34px); }
 

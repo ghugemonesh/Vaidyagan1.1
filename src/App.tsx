@@ -1,6 +1,6 @@
 import React, { useEffect, type ReactNode } from "react";
 import { AppProvider, useApp } from "./lib";
-import { Nav, Footer, CartDrawer, ToastHost, AccountAuthModal } from "./chrome";
+import { Nav, Footer, CartDrawer, ToastHost, AccountAuthModal, ScrollProgress, BackToTop } from "./chrome";
 import { Home } from "./home";
 import { Journal, Reader } from "./journal";
 import { Quiz, Herbs } from "./tools";
@@ -63,6 +63,7 @@ function Shell() {
     return (
       <div className="min-h-screen bg-forest-950 font-body text-sand-100">
         <AdminConsole />
+        <BackToTop />
         <ToastHost />
       </div>
     );
@@ -89,6 +90,8 @@ function Shell() {
         </svg>
       </div>
       <Nav />
+      <ScrollProgress />
+      <BackToTop />
       <main>
         {view.name === "home" && <Home />}
         {view.name === "journal" && <Journal />}

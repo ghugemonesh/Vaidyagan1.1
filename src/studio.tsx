@@ -781,9 +781,10 @@ export function Studio() {
                           {live && <button onClick={() => navigate({ name: "article", id: a.id })} aria-label="View live" className="grid h-7 w-7 place-items-center rounded-full border border-forest-700 text-sand-200/50 hover:border-kapha-400 hover:text-kapha-300"><Eye size={12} /></button>}
                           {canDelete && (
                             confirmDeleteId === a.id ? (
-                              <button onClick={() => { onDelete(a.id); setConfirmDeleteId(null); }} className="rounded-full bg-ember-500/20 px-3 py-1.5 font-mono text-[9px] font-semibold uppercase text-ember-300">Sure?</button>
+                              <button onClick={() => { onDelete(a.id); setConfirmDeleteId(null); }} className="animate-rise flex h-9 items-center gap-1.5 rounded-full bg-ember-500/25 px-3.5 font-mono text-[10px] font-bold uppercase tracking-[0.08em] text-ember-300 ring-1 ring-ember-500/50"><Trash size={13} /> Sure?</button>
                             ) : (
-                              <button onClick={() => { setConfirmDeleteId(a.id); window.setTimeout(() => setConfirmDeleteId((c) => (c === a.id ? null : c)), 3000); }} aria-label={`Delete ${a.title}`} className="grid h-7 w-7 place-items-center rounded-full border border-forest-700 text-sand-200/40 hover:border-ember-400 hover:text-ember-300"><Trash size={12} /></button>
+                              <button onClick={() => { setConfirmDeleteId(a.id); window.setTimeout(() => setConfirmDeleteId((c) => (c === a.id ? null : c)), 3000); }} aria-label={`Delete ${a.title}`} title="Delete article"
+                                className="grid h-9 w-9 place-items-center rounded-full border border-forest-700 bg-forest-950/40 text-sand-200/60 transition-all hover:scale-105 hover:border-ember-400 hover:bg-ember-500/10 hover:text-ember-300"><Trash size={15} /></button>
                             )
                           )}
                         </div>
@@ -814,9 +815,9 @@ export function Studio() {
           </div>
         ) : (
           /* ------------------------------ essays workspace ------------------------------ */
-          <div className={`grid gap-6 rounded-b-xl rounded-tr-xl border border-forest-800 bg-forest-900/40 p-4 lg:p-6 ${focus ? "lg:grid-cols-1" : "lg:grid-cols-[290px_1fr] lg:grid-rows-[auto_minmax(0,1fr)]"}`}>
+          <div className={`grid gap-6 rounded-b-xl rounded-tr-xl border border-forest-800 bg-forest-900/40 p-4 lg:p-6 ${focus ? "lg:grid-cols-1" : "lg:grid-cols-[290px_minmax(0,1fr)_280px]"}`}>
             {!focus && (
-              <aside className="flex max-h-[44vh] flex-col rounded-xl border border-forest-800 bg-forest-900/70 lg:col-start-1 lg:row-start-2 lg:min-h-0 lg:max-h-[calc(100vh-220px)]">
+              <aside className="flex max-h-[44vh] flex-col rounded-xl border border-forest-800 bg-forest-900/70 lg:max-h-[calc(100vh-220px)]">
                 <div className="flex items-center justify-between gap-2 border-b border-forest-800 px-4 py-3">
                   <p className="font-mono text-[9.5px] uppercase tracking-[0.2em] text-gold-400">{isSuper ? "All articles" : "Your articles"}</p>
                   <button onClick={() => newDraft(draftKind)} title={`Start a new ${KIND_META[draftKind].label}`}
@@ -859,16 +860,16 @@ export function Studio() {
                             <button
                               onClick={() => { setArmedDelete(null); onDelete(p.id); }}
                               onMouseLeave={() => setArmedDelete(null)}
-                              className="absolute right-1.5 top-1.5 z-10 rounded-md bg-ember-400 px-1.5 py-1 font-mono text-[7.5px] font-bold uppercase tracking-[0.08em] text-forest-950 shadow-[0_4px_14px_rgba(201,100,48,0.4)]"
+                              className="animate-rise absolute right-2 top-2 z-10 flex h-8 items-center gap-1 rounded-lg bg-ember-400 px-2 font-mono text-[8.5px] font-bold uppercase tracking-[0.08em] text-forest-950 shadow-[0_4px_16px_rgba(201,100,48,0.45)]"
                               title="Click again to confirm deletion">
-                              Sure?
+                              <Trash size={12} /> Sure?
                             </button>
                           ) : (
                             <button
                               onClick={() => { setArmedDelete(p.id); window.setTimeout(() => setArmedDelete((x) => (x === p.id ? null : x)), 3000); }}
                               aria-label={`Delete ${p.title || "untitled article"}`} title="Delete article"
-                              className="absolute right-1.5 top-1.5 z-10 grid h-6 w-6 place-items-center rounded-md text-sand-200/30 transition-all hover:bg-ember-500/15 hover:text-ember-300 focus:opacity-100 lg:opacity-0 lg:group-hover:opacity-100">
-                              <Trash size={11} />
+                              className="absolute right-2 top-2 z-10 grid h-8 w-8 place-items-center rounded-lg border border-forest-700/70 bg-forest-950/70 text-sand-200/70 backdrop-blur-sm transition-all hover:scale-105 hover:border-ember-400 hover:bg-ember-500/20 hover:text-ember-300">
+                              <Trash size={14} />
                             </button>
                           )
                         )}
@@ -982,9 +983,9 @@ export function Studio() {
               </div>
             </div>
 
-            {/* article settings — top of the LEFT column, beside the editor */}
+            {/* article settings — right column, beside the editor */}
             {!focus && (
-              <aside className="max-h-[420px] space-y-5 overflow-y-auto rounded-xl border border-forest-800 bg-forest-900/70 p-5 lg:col-start-1 lg:row-start-1 lg:max-h-[46vh]">
+              <aside className="max-h-[420px] space-y-5 overflow-y-auto rounded-xl border border-forest-800 bg-forest-900/70 p-5 lg:max-h-[calc(100vh-220px)]">
                 <div className="flex items-center gap-2">
                   <Gear size={14} className="text-gold-400" />
                   <p className="font-mono text-[9.5px] uppercase tracking-[0.2em] text-gold-400">Article settings</p>

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useApp, Monogram, SmartImg, type View } from "./lib";
 import { AUTHORS, BRAND_LOGO_URL, FREE_SHIP_AT, type Order } from "./data";
@@ -743,5 +743,55 @@ export function ToastHost() {
         ))}
       </AnimatePresence>
     </div>
+  );
+}
+
+/* ------------------------- scroll progress & back-to-top ---------------------- */
+
+/** A thin gold reading-progress line under the fixed header. */
+export function ScrollProgress() {
+  const barRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onScroll = () => {
+      const doc = document.documentElement;
+      const max = doc.scrollHeight - window.innerHeight;
+      const p = max > 0 ? Math.min(1, window.scrollY / max) : 0;
+      if (barRef.current) {
+        barRef.current.style.transform = `scaleX(${p})`;
+        barRef.current.style.opacity = p > 0.01 && p < 0.995 ? "1" : "0";
+      }
+    };
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+  return <div ref={barRef} className="scroll-progress w-full" style={{ transform: "scaleX(0)", opacity: 0 }} aria-hidden />;
+}
+
+/** Floating back-to-top pill that appears once you scroll past the hero. */
+export function BackToTop() {
+  const [show, setShow] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setShow(window.scrollY > 640);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+  return (
+    <AnimatePresence>
+      {show && (
+        <motion.button
+          key="btt"
+          initial={{ opacity: 0, y: 16, scale: 0.9 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 12, scale: 0.92 }}
+          onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+          aria-label="Back to top"
+          className="fixed bottom-6 right-6 z-[70] grid h-11 w-11 place-items-center rounded-full border border-gold-500/50 bg-forest-900/90 text-gold-300 shadow-[0_12px_36px_rgba(0,0,0,0.5)] backdrop-blur transition-colors hover:bg-gold-400 hover:text-forest-950"
+        >
+          <ArrowLeft size={17} className="rotate-90" />
+        </motion.button>
+      )}
+    </AnimatePresence>
   );
 }
