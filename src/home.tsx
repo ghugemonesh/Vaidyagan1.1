@@ -357,8 +357,8 @@ export function Home() {
 
   return (
     <div>
-      {/* hero — the tridosha wheel opens the page */}
-      <section className="relative overflow-hidden pt-28 lg:pt-36">
+      {/* hero — the tridosha wheel opens the page (pt clears the fixed nav) */}
+      <section className="relative overflow-hidden pt-32 sm:pt-36 lg:pt-40">
         <div className="absolute inset-0" aria-hidden style={{ background: "radial-gradient(62% 58% at 72% 42%, rgba(214,180,95,0.12), transparent 66%), radial-gradient(46% 42% at 16% 78%, rgba(130,179,158,0.09), transparent 70%), radial-gradient(38% 36% at 86% 12%, rgba(111,146,182,0.07), transparent 70%)" }} />
         <div className="relative mx-auto grid max-w-7xl gap-14 px-5 pb-20 lg:grid-cols-[1.05fr_1fr] lg:items-center lg:gap-8 lg:px-8 lg:pb-28">
           <div>

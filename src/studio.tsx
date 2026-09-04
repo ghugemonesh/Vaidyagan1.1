@@ -660,7 +660,9 @@ export function Studio() {
   };
 
   return (
-    <div className="relative min-h-screen">
+    /* pt clears the fixed site nav (84px mobile / 92px desktop) so the Studio
+       header row — Admin Console, Members, Sign out — is never covered */
+    <div className="relative min-h-screen pt-24 sm:pt-28">
       <div aria-hidden className="ops-grid pointer-events-none fixed inset-0 opacity-60" />
 
       {/* header */}
@@ -810,7 +812,7 @@ export function Studio() {
           /* ------------------------------ essays workspace ------------------------------ */
           <div className={`grid gap-6 rounded-b-xl rounded-tr-xl border border-forest-800 bg-forest-900/40 p-4 lg:p-6 ${focus ? "lg:grid-cols-1" : "lg:grid-cols-[290px_1fr]"}`}>
             {!focus && (
-              <aside className="flex max-h-[calc(100vh-220px)] flex-col rounded-xl border border-forest-800 bg-forest-900/70">
+              <aside className="flex max-h-[44vh] flex-col rounded-xl border border-forest-800 bg-forest-900/70 lg:col-start-1 lg:row-start-1 lg:max-h-[calc(100vh-220px)]">
                 <div className="flex items-center justify-between border-b border-forest-800 px-4 py-3.5">
                   <p className="font-mono text-[9.5px] uppercase tracking-[0.2em] text-gold-400">{isSuper ? "All articles" : "Your articles"}</p>
                   <div className="flex gap-1.5">
@@ -839,8 +841,8 @@ export function Studio() {
               </aside>
             )}
 
-            {/* editor column */}
-            <div className="relative flex max-h-[calc(100vh-190px)] min-h-[540px] flex-col overflow-hidden rounded-xl border border-forest-800 bg-forest-900/80">
+            {/* editor column — spans the full right side; settings sit left/below */}
+            <div className={`relative flex max-h-[calc(100vh-190px)] min-h-[540px] flex-col overflow-hidden rounded-xl border border-forest-800 bg-forest-900/80 ${focus ? "" : "lg:col-start-2 lg:row-span-2 lg:row-start-1"}`}>
               {mode === "write" ? (
                 <>
                   <EditorToolbar edRef={edRef} sync={sync} insertShloka={insertShloka}
@@ -941,10 +943,11 @@ export function Studio() {
               </div>
             </div>
 
-            {/* metadata rail */}
+            {/* article settings — lives in the LEFT column, beneath the article list */}
             {!focus && (
-              <aside className="max-h-[calc(100vh-220px)] space-y-5 overflow-y-auto rounded-xl border border-forest-800 bg-forest-900/70 p-5">
-                <div>
+              <aside className="max-h-[46vh] space-y-5 overflow-y-auto rounded-xl border border-forest-800 bg-forest-900/70 p-5 lg:col-start-1 lg:row-start-2 lg:max-h-[calc(100vh-220px)]">
+                <div className="flex items-center gap-2">
+                  <Gear size={14} className="text-gold-400" />
                   <p className="font-mono text-[9.5px] uppercase tracking-[0.2em] text-gold-400">Article settings</p>
                 </div>
                 <div>
