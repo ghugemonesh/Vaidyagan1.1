@@ -260,39 +260,95 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
 
 /* -------------------------------- the editor -------------------------------- */
 
+interface FmtState { bold: boolean; italic: boolean; underline: boolean; strike: boolean; block: string }
+
 function EditorToolbar({ edRef, sync, insertShloka, onOpenImage, refreshFmt }: {
   edRef: React.RefObject<HTMLDivElement>; sync: () => void; insertShloka: () => void; onOpenImage: () => void; refreshFmt: () => void;
 }) {
+  const [fmt, setFmt] = useState<FmtState>({ bold: false, italic: false, underline: false, strike: false, block: "p" });
+  /* remember the doctor's selection so toolbar clicks (which steal focus) can put it back */
+  const savedRange = useRef<Range | null>(null);
+
+  const refresh = useCallback(() => {
+    const ed = edRef.current;
+    const sel = window.getSelection();
+    if (!ed || !sel || sel.rangeCount === 0 || !sel.anchorNode) return;
+    try {
+      if (ed.contains(sel.anchorNode)) savedRange.current = sel.getRangeAt(0).cloneRange();
+    } catch { /* ignore */ }
+    if (!ed.contains(sel.anchorNode)) return;
+    try {
+      const raw = (document.queryCommandValue("formatBlock") || "").toLowerCase().replace(/[<>]/g, "");
+      const next: FmtState = {
+        bold: document.queryCommandState("bold"),
+        italic: document.queryCommandState("italic"),
+        underline: document.queryCommandState("underline"),
+        strike: document.queryCommandState("strikeThrough"),
+        block: raw === "div" ? "p" : raw || "p",
+      };
+      setFmt((prev) => (
+        prev.bold === next.bold && prev.italic === next.italic && prev.underline === next.underline &&
+        prev.strike === next.strike && prev.block === next.block
+      ) ? prev : next);
+    } catch { /* older engines */ }
+  }, [edRef]);
+
+  useEffect(() => {
+    document.addEventListener("selectionchange", refresh);
+    return () => document.removeEventListener("selectionchange", refresh);
+  }, [refresh]);
+
   const exec = (cmd: string, val?: string) => {
     const ed = edRef.current;
     if (!ed) return;
-    try {
+    const sel = window.getSelection();
+    /* CRITICAL: check the selection BEFORE focusing — focusing collapses it to
+       the start, which is why style commands used to apply to nothing. */
+    const lost = !sel || sel.rangeCount === 0 || sel.isCollapsed || !sel.anchorNode || !ed.contains(sel.anchorNode);
+    if (lost) {
       ed.focus();
-      document.execCommand(cmd, false, val);
-    } catch { /* older engines */ }
+      if (savedRange.current) {
+        try { const s = window.getSelection(); s?.removeAllRanges(); s?.addRange(savedRange.current); } catch { /* ignore */ }
+      }
+    }
+    try { document.execCommand(cmd, false, val); } catch { /* older engines */ }
     sync();
+    refresh();
     refreshFmt();
   };
-  const btn = "grid h-9 w-9 place-items-center rounded-lg border border-forest-700 text-sand-200/70 transition-all hover:border-gold-400 hover:text-gold-300";
+
+  const btn = (active?: boolean) =>
+    `grid h-9 w-9 place-items-center rounded-lg border transition-all ${
+      active
+        ? "border-gold-400 bg-gold-400/15 text-gold-300 shadow-[0_0_12px_rgba(214,180,95,0.25)]"
+        : "border-forest-700 text-sand-200/70 hover:border-gold-400 hover:text-gold-300"
+    }`;
+  const blockLabel: Record<string, string> = { p: "Normal text", h2: "Heading 2", h3: "Heading 3", blockquote: "Quote" };
+
   return (
     <div className="flex flex-wrap items-center gap-1.5 border-b border-forest-800 bg-forest-850/80 px-3 py-2">
-      <select onChange={(e) => { if (e.target.value) exec("formatBlock", e.target.value); e.target.value = ""; }} defaultValue=""
+      <select value={["p", "h2", "h3", "blockquote"].includes(fmt.block) ? fmt.block : "p"}
+        onChange={(e) => { if (e.target.value) exec("formatBlock", e.target.value); }}
         aria-label="Paragraph style" className="h-9 rounded-lg border border-forest-700 bg-forest-900 px-2 font-mono text-[10.5px] uppercase tracking-wide text-sand-200/75 focus:border-gold-400 focus:outline-none">
-        <option value="" disabled>¶ Style</option>
         <option value="p">Normal</option>
         <option value="h2">Heading 2</option>
         <option value="h3">Heading 3</option>
         <option value="blockquote">Quote</option>
       </select>
       <span className="mx-1 h-5 w-px bg-forest-700" />
-      <button onMouseDown={(e) => e.preventDefault()} onClick={() => exec("bold")} className={btn} title="Bold" aria-label="Bold"><Bold size={15} /></button>
-      <button onMouseDown={(e) => e.preventDefault()} onClick={() => exec("italic")} className={btn} title="Italic" aria-label="Italic"><Italic size={15} /></button>
-      <button onMouseDown={(e) => e.preventDefault()} onClick={() => exec("underline")} className={btn} title="Underline" aria-label="Underline"><Underline size={15} /></button>
-      <button onMouseDown={(e) => e.preventDefault()} onClick={() => exec("strikeThrough")} className={btn} title="Strikethrough" aria-label="Strikethrough"><Strikethrough size={15} /></button>
+      <button onMouseDown={(e) => e.preventDefault()} onClick={() => exec("bold")} className={btn(fmt.bold)} title="Bold" aria-label="Bold" aria-pressed={fmt.bold}><Bold size={15} /></button>
+      <button onMouseDown={(e) => e.preventDefault()} onClick={() => exec("italic")} className={btn(fmt.italic)} title="Italic" aria-label="Italic" aria-pressed={fmt.italic}><Italic size={15} /></button>
+      <button onMouseDown={(e) => e.preventDefault()} onClick={() => exec("underline")} className={btn(fmt.underline)} title="Underline" aria-label="Underline" aria-pressed={fmt.underline}><Underline size={15} /></button>
+      <button onMouseDown={(e) => e.preventDefault()} onClick={() => exec("strikeThrough")} className={btn(fmt.strike)} title="Strikethrough" aria-label="Strikethrough" aria-pressed={fmt.strike}><Strikethrough size={15} /></button>
       <span className="mx-1 h-5 w-px bg-forest-700" />
-      <button onMouseDown={(e) => e.preventDefault()} onClick={() => exec("insertUnorderedList")} className={btn} title="Bullet list" aria-label="Bullet list"><List size={15} /></button>
-      <button onMouseDown={(e) => e.preventDefault()} onClick={insertShloka} className={btn} title="Insert shloka quote" aria-label="Insert shloka"><BookOpen size={15} /></button>
-      <button onMouseDown={(e) => e.preventDefault()} onClick={onOpenImage} className={btn} title="Insert image" aria-label="Insert image"><ImageIcon size={15} /></button>
+      <button onMouseDown={(e) => e.preventDefault()} onClick={() => exec("insertUnorderedList")} className={btn()} title="Bullet list" aria-label="Bullet list"><List size={15} /></button>
+      <button onMouseDown={(e) => e.preventDefault()} onClick={insertShloka} className={btn()} title="Insert shloka quote" aria-label="Insert shloka"><BookOpen size={15} /></button>
+      <button onMouseDown={(e) => e.preventDefault()} onClick={onOpenImage} className={btn()} title="Insert image" aria-label="Insert image"><ImageIcon size={15} /></button>
+      {/* live readout — tells the doctor exactly what the cursor sits in */}
+      <span className="ml-auto hidden items-center gap-1 rounded-full border border-forest-700 px-2.5 py-1 font-mono text-[9px] uppercase tracking-[0.12em] text-gold-300/80 md:flex">
+        {blockLabel[fmt.block] ?? "Normal text"}
+        {fmt.bold && " · B"}{fmt.italic && " · I"}{fmt.underline && " · U"}{fmt.strike && " · S"}
+      </span>
     </div>
   );
 }
@@ -626,20 +682,28 @@ export function Studio() {
               </div>
               <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
                 {myArticles.map((p) => (
-                  <div key={p.id} className="group relative">
-                    <button onClick={() => selectPost(p.id)}
-                      className={`block w-full rounded-lg border p-3 pr-9 text-left transition-all ${selectedId === p.id ? "border-gold-500/60 bg-gold-400/8" : "border-forest-800 bg-forest-850/50 hover:border-forest-600"}`}>
-                      <div className="flex items-center gap-2">{statusPill(p.status)}<span className="ml-auto font-mono text-[8px] uppercase tracking-[0.1em] text-sand-200/35">{formatDate(p.date)}</span></div>
+                  <div key={p.id} className={`group overflow-hidden rounded-lg border transition-all ${selectedId === p.id ? "border-gold-500/60 bg-gold-400/8" : "border-forest-800 bg-forest-850/50 hover:border-forest-600"}`}>
+                    <button onClick={() => selectPost(p.id)} className="block w-full p-3 text-left">
+                      <div className="flex items-center gap-2">{statusPill(p.status)}</div>
                       <p className={`mt-1.5 truncate text-[13px] font-semibold ${selectedId === p.id ? "text-gold-300" : "text-sand-100"}`}>{p.title || "Untitled"}</p>
-                      {isSuper && <p className="mt-0.5 font-mono text-[8px] uppercase tracking-[0.12em] text-sand-200/35">by {authorFor(p).name}</p>}
+                      {isSuper && <p className="mt-0.5 truncate font-mono text-[8px] uppercase tracking-[0.12em] text-sand-200/35">by {authorFor(p).name}</p>}
                     </button>
-                    {armedDelete === p.id ? (
-                      <button onClick={() => onDelete(p.id)} onMouseLeave={() => setArmedDelete(null)} title="Click again to confirm"
-                        className="absolute right-2 top-2 z-10 flex h-8 items-center gap-1 rounded-lg bg-ember-400 px-2 font-mono text-[8.5px] font-bold uppercase tracking-[0.08em] text-forest-950 shadow-[0_4px_16px_rgba(201,100,48,0.45)]"><Trash2 size={12} /> Sure?</button>
-                    ) : (
-                      <button onClick={() => { setArmedDelete(p.id); window.setTimeout(() => setArmedDelete((x) => (x === p.id ? null : x)), 3000); }} aria-label={`Delete ${p.title || "untitled article"}`} title="Delete article"
-                        className="absolute right-2 top-2 z-10 grid h-8 w-8 place-items-center rounded-lg border border-forest-700/70 bg-forest-950/70 text-sand-200/70 backdrop-blur-sm transition-all hover:scale-105 hover:border-ember-400 hover:bg-ember-500/20 hover:text-ember-300"><Trash2 size={14} /></button>
-                    )}
+                    {/* footer row — date on the left, delete on the right: they can never collide */}
+                    <div className="flex items-center justify-between gap-2 border-t border-forest-800/60 px-3 py-1.5">
+                      <span className="font-mono text-[8px] uppercase tracking-[0.1em] text-sand-200/40">{formatDate(p.date)}</span>
+                      {armedDelete === p.id ? (
+                        <button onClick={() => onDelete(p.id)} onMouseLeave={() => setArmedDelete(null)} title="Click again to confirm"
+                          className="animate-rise flex h-7 items-center gap-1 rounded-md bg-ember-400 px-2 font-mono text-[8px] font-bold uppercase tracking-[0.08em] text-forest-950 shadow-[0_4px_14px_rgba(201,100,48,0.45)]">
+                          <Trash2 size={11} /> Sure?
+                        </button>
+                      ) : (
+                        <button onClick={() => { setArmedDelete(p.id); window.setTimeout(() => setArmedDelete((x) => (x === p.id ? null : x)), 3000); }}
+                          aria-label={`Delete ${p.title || "untitled article"}`} title="Delete article"
+                          className="grid h-7 w-7 shrink-0 place-items-center rounded-md border border-forest-700/70 text-sand-200/60 transition-all hover:scale-105 hover:border-ember-400 hover:bg-ember-500/15 hover:text-ember-300">
+                          <Trash2 size={13} />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
                 {myArticles.length === 0 && <p className="p-4 text-center text-[12px] text-sand-200/40">No posts yet — open a fresh draft.</p>}
