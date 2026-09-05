@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { readImageFile } from "./lib";
+import { readImageFile, SmartImg } from "./lib";
 import { Quote, ImageIcon, Video, Eye, Pen, Monitor, Phone, Expand, Compress, List, Close, Check, Upload } from "./icons";
 
 export interface FmtState { bold: boolean; italic: boolean; underline: boolean; strike: boolean; center: boolean; full: boolean; block: string }
@@ -259,7 +259,7 @@ export function ImageInsertModal({ onInsert, onClose }: { onInsert: (html: strin
               ))}
             </div>
           </div>
-          {url && <img src={url} alt="Preview" className="max-h-40 w-full rounded-lg border border-forest-700 object-cover" />}
+          {url && <SmartImg src={url} alt="Preview" className="max-h-40 w-full rounded-lg border border-forest-700 object-cover" />}
           <button onClick={insert} disabled={!url.trim()} className="flex w-full items-center justify-center gap-2 rounded-full bg-gold-400 py-3 font-mono text-[10.5px] font-semibold uppercase tracking-[0.18em] text-forest-950 hover:bg-gold-300 disabled:opacity-35">
             <Check size={14} /> Insert into article
           </button>

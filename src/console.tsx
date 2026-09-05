@@ -161,7 +161,7 @@ export function AdminConsole() {
       {/* sidebar */}
       <aside className={`relative z-30 hidden shrink-0 flex-col border-r border-forest-800 bg-forest-900/70 backdrop-blur transition-all duration-300 lg:flex ${collapsed ? "w-[76px]" : "w-[240px]"}`}>
         <div className={`flex items-center gap-3 border-b border-forest-800 px-4 py-5 ${collapsed ? "justify-center px-2" : ""}`}>
-          <img src={BRAND_LOGO_URL} alt="Vaidyagan" className="h-10 w-10 shrink-0 rounded-xl border border-gold-500/60 object-cover" />
+          <SmartImg src={BRAND_LOGO_URL} alt="Vaidyagan" className="h-10 w-10 shrink-0 rounded-xl border border-gold-500/60 object-cover" />
           {!collapsed && (
             <div className="min-w-0">
               <p className="truncate font-display text-lg font-semibold leading-none text-sand-100">Vaidyagan</p>
@@ -199,7 +199,7 @@ export function AdminConsole() {
             <motion.aside initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }} transition={{ type: "spring", damping: 32, stiffness: 300 }}
               onClick={(e) => e.stopPropagation()} className="flex h-full w-[260px] flex-col border-r border-forest-800 bg-forest-900 p-4">
               <div className="flex items-center gap-3 border-b border-forest-800 pb-4">
-                <img src={BRAND_LOGO_URL} alt="Vaidyagan" className="h-10 w-10 rounded-xl border border-gold-500/60 object-cover" />
+                <SmartImg src={BRAND_LOGO_URL} alt="Vaidyagan" className="h-10 w-10 rounded-xl border border-gold-500/60 object-cover" />
                 <div><p className="font-display text-lg font-semibold leading-none text-sand-100">Vaidyagan</p><p className="mt-1 font-mono text-[8.5px] uppercase tracking-[0.2em] text-gold-400/80">Admin Console</p></div>
               </div>
               <nav className="mt-4 flex-1 space-y-1 overflow-y-auto">
@@ -519,7 +519,7 @@ function OrdersPage({ role, refresh, tick }: { role: CRole; refresh: () => void;
       const w = window.open("", "_blank");
       if (!w) return;
       w.document.write(`<html><head><title>Invoice ${o.id}</title><style>body{font-family:Georgia,serif;color:#22271f;padding:40px;max-width:720px;margin:0 auto}h1{margin:0}small{color:#777;font-family:monospace}table{width:100%;border-collapse:collapse;margin-top:18px}th,td{border-bottom:1px solid #e2ddcf;padding:9px 8px;text-align:left;font-size:14px}th{font-family:monospace;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#a37e2a}.amt{text-align:right}.tot td{font-weight:bold;border:none}</style></head><body>
-      <div style="display:flex;gap:14px;align-items:center;border-bottom:3px solid #c49c3e;padding-bottom:14px"><img src="${BRAND_LOGO_URL}" style="width:52px;height:52px;border-radius:12px;object-fit:cover"/><div><h1>Vaidyagan</h1><small>Clinically verified Ayurveda</small></div><div style="margin-left:auto;text-align:right"><small>TAX INVOICE</small><br><b>${o.id}</b><br><small>${formatDate(o.placedAt)}</small></div></div>
+      <div style="display:flex;gap:14px;align-items:center;border-bottom:3px solid #c49c3e;padding-bottom:14px"><img src="${BRAND_LOGO_URL}" onerror="this.style.display='none'" style="width:52px;height:52px;border-radius:12px;object-fit:cover"/><div><h1>Vaidyagan</h1><small>Clinically verified Ayurveda</small></div><div style="margin-left:auto;text-align:right"><small>TAX INVOICE</small><br><b>${o.id}</b><br><small>${formatDate(o.placedAt)}</small></div></div>
       <p style="margin-top:18px"><small>BILL TO</small><br><b>${o.customer.name}</b><br>${o.customer.address}, ${o.customer.city} — ${o.customer.pin}<br>${o.customer.phone}</p>
       <table><tr><th>Item</th><th>Qty</th><th class="amt">Amount</th></tr>${o.items.map((i) => `<tr><td>${i.name}</td><td>${i.qty}</td><td class="amt">₹${(i.price * i.qty).toLocaleString("en-IN")}</td></tr>`).join("")}
       <tr class="tot"><td colspan="2">Total</td><td class="amt">₹${o.total.toLocaleString("en-IN")}</td></tr></table>

@@ -845,34 +845,37 @@ export function Studio() {
                   {myArticles.map((p) => {
                     const canDelete = isSuper || me?.canDeletePublished || p.status !== "published";
                     return (
-                      <div key={p.id} className="group relative">
-                        <button onClick={() => openPost(p.id)}
-                          className={`block w-full rounded-lg border p-3 pr-8 text-left transition-all ${selectedId === p.id ? "border-gold-500/60 bg-gold-400/8" : "border-forest-800 bg-forest-850/50 hover:border-forest-600"}`}>
+                      <div key={p.id} className="group">
+                        <div role="button" tabIndex={0}
+                          onClick={() => openPost(p.id)}
+                          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openPost(p.id); } }}
+                          aria-label={`Open ${p.title || "untitled article"}`}
+                          className={`block w-full cursor-pointer rounded-lg border p-3 text-left transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-gold-400/60 ${selectedId === p.id ? "border-gold-500/60 bg-gold-400/8" : "border-forest-800 bg-forest-850/50 hover:border-forest-600"}`}>
                           <div className="flex items-center gap-2">
                             {statusPill(p.status)}
                             <span className="ml-auto font-mono text-[8px] uppercase tracking-[0.1em] text-sand-200/35">{formatDate(p.date)}</span>
+                            {canDelete && (
+                              armedDelete === p.id ? (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); setArmedDelete(null); onDelete(p.id); }}
+                                  onMouseLeave={() => setArmedDelete(null)}
+                                  className="animate-rise flex h-7 shrink-0 items-center gap-1 rounded-lg bg-ember-400 px-2 font-mono text-[8.5px] font-bold uppercase tracking-[0.08em] text-forest-950 shadow-[0_4px_16px_rgba(201,100,48,0.45)]"
+                                  title="Click again to confirm deletion">
+                                  <Trash size={11} /> Sure?
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); setArmedDelete(p.id); window.setTimeout(() => setArmedDelete((x) => (x === p.id ? null : x)), 3000); }}
+                                  aria-label={`Delete ${p.title || "untitled article"}`} title="Delete article"
+                                  className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-forest-700/70 bg-forest-950/70 text-sand-200/70 transition-all hover:scale-105 hover:border-ember-400 hover:bg-ember-500/20 hover:text-ember-300 focus-visible:opacity-100 lg:opacity-40 lg:group-hover:opacity-100">
+                                  <Trash size={13} />
+                                </button>
+                              )
+                            )}
                           </div>
                           <p className={`mt-1.5 truncate text-[13px] font-semibold ${selectedId === p.id ? "text-gold-300" : "text-sand-100"}`}>{p.title || "Untitled"}</p>
                           {isSuper && <p className="mt-0.5 font-mono text-[8px] uppercase tracking-[0.12em] text-sand-200/35">by {authorFor(p).name}</p>}
-                        </button>
-                        {canDelete && (
-                          armedDelete === p.id ? (
-                            <button
-                              onClick={() => { setArmedDelete(null); onDelete(p.id); }}
-                              onMouseLeave={() => setArmedDelete(null)}
-                              className="animate-rise absolute right-2 top-2 z-10 flex h-8 items-center gap-1 rounded-lg bg-ember-400 px-2 font-mono text-[8.5px] font-bold uppercase tracking-[0.08em] text-forest-950 shadow-[0_4px_16px_rgba(201,100,48,0.45)]"
-                              title="Click again to confirm deletion">
-                              <Trash size={12} /> Sure?
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => { setArmedDelete(p.id); window.setTimeout(() => setArmedDelete((x) => (x === p.id ? null : x)), 3000); }}
-                              aria-label={`Delete ${p.title || "untitled article"}`} title="Delete article"
-                              className="absolute right-2 top-2 z-10 grid h-8 w-8 place-items-center rounded-lg border border-forest-700/70 bg-forest-950/70 text-sand-200/70 backdrop-blur-sm transition-all hover:scale-105 hover:border-ember-400 hover:bg-ember-500/20 hover:text-ember-300">
-                              <Trash size={14} />
-                            </button>
-                          )
-                        )}
+                        </div>
                       </div>
                     );
                   })}

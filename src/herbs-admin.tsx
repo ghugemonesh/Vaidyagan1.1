@@ -226,14 +226,14 @@ export function HerbArticleWriter({ authorId }: { authorId: string }) {
       </div>
       <div className="mt-3 rounded-xl border border-forest-700 bg-forest-950/50 focus-within:border-gold-400">
         <div className="flex items-center gap-1.5 border-b border-forest-800 px-3 py-2" onMouseDown={(e) => e.preventDefault()}>
-          <button onClick={() => { editorRef.current?.focus(); document.execCommand("bold"); }} className="grid h-8 w-8 place-items-center rounded-md border border-forest-700 text-sand-200/70 hover:border-gold-400 hover:text-gold-300" title="Bold"><b className="text-xs">B</b></button>
-          <button onClick={() => { editorRef.current?.focus(); document.execCommand("italic"); }} className="grid h-8 w-8 place-items-center rounded-md border border-forest-700 text-sand-200/70 hover:border-gold-400 hover:text-gold-300" title="Italic"><i className="text-xs">I</i></button>
-          <button onClick={() => { editorRef.current?.focus(); document.execCommand("insertUnorderedList"); }} className="grid h-8 w-8 place-items-center rounded-md border border-forest-700 text-sand-200/70 hover:border-gold-400 hover:text-gold-300" title="Bullet list"><span className="text-xs leading-none">•≡</span></button>
+          <button onClick={() => { try { editorRef.current?.focus(); document.execCommand("bold"); } catch { /* ignore */ } }} className="grid h-8 w-8 place-items-center rounded-md border border-forest-700 text-sand-200/70 hover:border-gold-400 hover:text-gold-300" title="Bold"><b className="text-xs">B</b></button>
+          <button onClick={() => { try { editorRef.current?.focus(); document.execCommand("italic"); } catch { /* ignore */ } }} className="grid h-8 w-8 place-items-center rounded-md border border-forest-700 text-sand-200/70 hover:border-gold-400 hover:text-gold-300" title="Italic"><i className="text-xs">I</i></button>
+          <button onClick={() => { try { editorRef.current?.focus(); document.execCommand("insertUnorderedList"); } catch { /* ignore */ } }} className="grid h-8 w-8 place-items-center rounded-md border border-forest-700 text-sand-200/70 hover:border-gold-400 hover:text-gold-300" title="Bullet list"><span className="text-xs leading-none">•≡</span></button>
           <label className="ml-1 flex cursor-pointer items-center gap-1.5 rounded-md border border-forest-700 px-2.5 py-1.5 font-mono text-[9px] uppercase tracking-[0.12em] text-sand-200/60 hover:border-gold-400 hover:text-gold-300" title="Add image">
             <ImageIcon size={13} /> Image
             <input type="file" accept="image/*" className="hidden" onChange={(e) => {
               const f = e.target.files?.[0];
-              if (f) readImageFile(f, (u) => { editorRef.current?.focus(); document.execCommand("insertHTML", false, `<img src="${u}" style="max-width:100%;border-radius:10px" />`); }, (m) => toast(m));
+              if (f) readImageFile(f, (u) => { try { editorRef.current?.focus(); document.execCommand("insertHTML", false, `<img src="${u}" style="max-width:100%;border-radius:10px" />`); } catch { /* ignore */ } }, (m) => toast(m));
               e.target.value = "";
             }} />
           </label>

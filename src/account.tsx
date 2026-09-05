@@ -79,7 +79,7 @@ function InvoiceModal({ order, onClose }: { order: Order; onClose: () => void })
           .ft{margin-top:34px;padding-top:14px;border-top:1px solid #e2ddcf;font-size:11px;color:#888}
         </style></head><body>
         <div class="hd">
-          <img src="${BRAND_LOGO_URL}" alt="Vaidyagan"/>
+          <img src="${BRAND_LOGO_URL}" alt="Vaidyagan" onerror="this.style.display='none'"/>
           <div><h1>Vaidyagan</h1><small>Clinically verified Ayurveda · vaidyagan@gmail.com</small></div>
           <div style="margin-left:auto;text-align:right"><small>TAX INVOICE</small><br/><b>${order.id}</b><br/><small>${formatDate(order.placedAt)}</small></div>
         </div>
@@ -109,7 +109,7 @@ function InvoiceModal({ order, onClose }: { order: Order; onClose: () => void })
         onClick={(e) => e.stopPropagation()} className="w-full max-w-md rounded-2xl border border-forest-700 bg-forest-900 p-6" role="dialog" aria-label={`Invoice ${order.id}`}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img src={BRAND_LOGO_URL} alt="Vaidyagan" className="h-14 w-14 rounded-[14px] border-2 border-gold-500/70 object-cover" />
+            <SmartImg src={BRAND_LOGO_URL} alt="Vaidyagan" className="h-14 w-14 rounded-[14px] border-2 border-gold-500/70 object-cover" />
             <div>
               <p className="font-mono text-[9.5px] uppercase tracking-[0.24em] text-gold-400">Tax invoice</p>
               <p className="font-display text-2xl font-semibold text-sand-100">{order.id}</p>
