@@ -300,7 +300,9 @@ export function AdminConsole() {
 
         {/* page */}
         <main className="flex-1 px-4 py-7 lg:px-7">
-          <motion.div key={page} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+          {/* opacity-only transition: a transform here would create a containing block
+              and break the position:fixed slide-over drawers inside each page */}
+          <motion.div key={page} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.28 }}>
             {page === "home" && <HomePage role={role} refresh={refresh} goTo={setPage} />}
             {page === "orders" && <OrdersPage role={role} refresh={refresh} />}
             {page === "products" && <ProductsPage role={role} refresh={refresh} />}

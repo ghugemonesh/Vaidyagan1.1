@@ -5,6 +5,7 @@
    ========================================================================== */
 
 import React, { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { ORDER_META, type OrderStatus } from "../data";
 import { Check, Close, RefreshIcon, Search, Trash } from "../icons";
@@ -158,14 +159,16 @@ export function Drawer({ open, onClose, title, subtitle, children, wide = false 
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
-  return (
+  /* Portal to <body> so the drawer always anchors to the viewport — immune to any
+     ancestor transform / filter / overflow that would otherwise clip or shift it. */
+  return createPortal(
     <AnimatePresence>
       {open && (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
           className="fixed inset-0 z-[70] bg-forest-950/70 backdrop-blur-sm" onClick={onClose}>
           <motion.aside initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} transition={{ type: "spring", damping: 32, stiffness: 300 }}
             onClick={(e) => e.stopPropagation()} role="dialog" aria-label={title}
-            className={`fixed inset-y-0 right-0 flex w-full flex-col overflow-y-auto border-l border-forest-800 bg-forest-900 p-6 sm:inset-x-auto sm:bottom-0 sm:top-0 sm:max-h-none ${wide ? "sm:max-w-xl" : "sm:max-w-md"}`}>
+            className={`fixed inset-y-0 right-0 flex w-full flex-col overflow-y-auto border-l border-forest-800 bg-forest-900 p-6 ${wide ? "sm:max-w-xl" : "sm:max-w-md"}`}>
             <div className="flex items-start justify-between">
               <div>
                 <p className="font-mono text-[9.5px] uppercase tracking-[0.22em] text-gold-400">{subtitle ?? "Details"}</p>
@@ -177,7 +180,8 @@ export function Drawer({ open, onClose, title, subtitle, children, wide = false 
           </motion.aside>
         </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 }
 
