@@ -142,6 +142,16 @@ export interface Address { id: string; label: "Home" | "Work" | "Other"; name: s
 export interface Customer { id: string; name: string; phone: string; email: string; password?: string; provider: "otp" | "google" | "email"; addresses: Address[]; createdAt: string; suspended?: boolean; notes?: string }
 const CUSTOMERS_KEY = "vaidyagan_customers_v1";
 const CUSTOMER_SESSION_KEY = "vaidyagan_customer_session_v1";
+
+/** Demo shoppers — ids line up with SEED_ORDERS.customerId so every console
+ *  window (Customers, Orders, Analytics) tells one coherent story. */
+const SEED_CUSTOMERS: Customer[] = [
+  { id: "c-1", name: "Rohini Deshmukh", phone: "+91 98220 11111", email: "rohini.d@example.in", provider: "otp", createdAt: new Date(Date.now() - 40 * 86400e3).toISOString(), addresses: [{ id: "a-1", label: "Home", name: "Rohini Deshmukh", phone: "+91 98220 11111", line1: "14 Shivaji Nagar", city: "Pune", state: "Maharashtra", pin: "411005", isDefault: true }] },
+  { id: "c-2", name: "Amit Kulkarni", phone: "+91 98500 22222", email: "amit.k@example.in", provider: "google", createdAt: new Date(Date.now() - 25 * 86400e3).toISOString(), addresses: [{ id: "a-2", label: "Home", name: "Amit Kulkarni", phone: "+91 98500 22222", line1: "3 FC Road", city: "Pune", state: "Maharashtra", pin: "411004", isDefault: true }] },
+  { id: "c-3", name: "Sneha Patil", phone: "+91 99700 33333", email: "sneha.p@example.in", provider: "otp", createdAt: new Date(Date.now() - 12 * 86400e3).toISOString(), addresses: [{ id: "a-3", label: "Home", name: "Sneha Patil", phone: "+91 99700 33333", line1: "22 Kothrud", city: "Pune", state: "Maharashtra", pin: "411038", isDefault: true }] },
+  { id: "c-4", name: "Vikram Joshi", phone: "+91 98900 44444", email: "vikram.j@example.in", provider: "email", password: "vaidya123", createdAt: new Date(Date.now() - 8 * 86400e3).toISOString(), addresses: [{ id: "a-4", label: "Home", name: "Vikram Joshi", phone: "+91 98900 44444", line1: "8 Baner", city: "Pune", state: "Maharashtra", pin: "411045", isDefault: true }] },
+];
+
 function loadCustomers(): Customer[] {
   try {
     const raw = localStorage.getItem(CUSTOMERS_KEY);
@@ -150,7 +160,7 @@ function loadCustomers(): Customer[] {
       if (Array.isArray(parsed)) return parsed;
     }
   } catch { /* fresh */ }
-  return [];
+  return SEED_CUSTOMERS;
 }
 function persistCustomers(list: Customer[]) {
   try { localStorage.setItem(CUSTOMERS_KEY, JSON.stringify(list)); } catch { /* ignore */ }
