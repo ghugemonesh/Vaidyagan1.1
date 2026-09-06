@@ -1002,7 +1002,7 @@ export function Studio() {
                     </div>
                   </button>
                   {armedDelete === a.id ? (
-                    <button onClick={() => onDelete(a.id)} onMouseLeave={() => setArmedDelete(null)} title="Click again to confirm"
+                    <button onClick={() => onDelete(a.id)} title="Click again to confirm" aria-label={`Confirm delete ${a.title || "untitled article"}`}
                       className="absolute right-2 top-2 z-10 flex h-8 items-center gap-1 rounded-lg bg-ember-400 px-2 font-mono text-[8.5px] font-bold uppercase tracking-[0.08em] text-forest-950 shadow-[0_4px_16px_rgba(201,100,48,0.45)]"><Trash2 size={12} /> Sure?</button>
                   ) : (
                     <button onClick={() => { setArmedDelete(a.id); window.setTimeout(() => setArmedDelete((x) => (x === a.id ? null : x)), 3000); }} aria-label={`Delete ${a.title || "untitled article"}`} title="Delete article"
@@ -1084,7 +1084,7 @@ export function Studio() {
                     <div className="flex items-center justify-between gap-2 border-t border-forest-800/60 px-3 py-1.5">
                       <span className="font-mono text-[8px] uppercase tracking-[0.1em] text-sand-200/40">{formatDate(p.date)}</span>
                       {armedDelete === p.id ? (
-                        <button onClick={() => onDelete(p.id)} onMouseLeave={() => setArmedDelete(null)} title="Click again to confirm"
+                        <button onClick={() => onDelete(p.id)} title="Click again to confirm" aria-label={`Confirm delete ${p.title || "untitled article"}`}
                           className="animate-rise flex h-7 items-center gap-1 rounded-md bg-ember-400 px-2 font-mono text-[8px] font-bold uppercase tracking-[0.08em] text-forest-950 shadow-[0_4px_14px_rgba(201,100,48,0.45)]">
                           <Trash2 size={11} /> Sure?
                         </button>

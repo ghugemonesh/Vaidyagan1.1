@@ -165,6 +165,7 @@ const ORDERS_KEY = "vaidyagan_orders_v1";
 const STORE_FLAG_KEY = "vaidyagan_store_enabled_v1";
 const PROFILE_TAB_KEY = "vaidyagan_profile_tab_v1";
 const DESK_DOCTORS_KEY = "vaidyagan_desk_doctors_v1";
+const DELETED_POSTS_KEY = "vaidyagan_deleted_post_ids_v1";
 
 function loadPosts(): Article[] {
   try {
@@ -177,6 +178,18 @@ function loadPosts(): Article[] {
   return [];
 }
 function persistPosts(list: Article[]) { try { localStorage.setItem(POSTS_KEY, JSON.stringify(list)); } catch { /* ignore */ } }
+
+function loadDeletedPostIds(): string[] {
+  try {
+    const raw = localStorage.getItem(DELETED_POSTS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as string[];
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch { /* fresh */ }
+  return [];
+}
+function persistDeletedPostIds(ids: string[]) { try { localStorage.setItem(DELETED_POSTS_KEY, JSON.stringify(ids)); } catch { /* ignore */ } }
 
 function loadHerbs(): Herb[] {
   try {
@@ -275,6 +288,7 @@ export function useApp(): AppCtx {
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [view, setView] = useState<View>({ name: "home" });
   const [userPosts, setUserPosts] = useState<Article[]>(loadPosts);
+  const [deletedPostIds, setDeletedPostIds] = useState<string[]>(loadDeletedPostIds);
   const [herbs, setHerbs] = useState<Herb[]>(loadHerbs);
   const [products, setProducts] = useState<Product[]>(loadProducts);
   const [orders, setOrders] = useState<Order[]>(loadOrders);
@@ -317,11 +331,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const allArticles = useMemo(() => {
+    const gone = new Set(deletedPostIds);
     const ids = new Set(userPosts.map((p) => p.id));
-    const merged = [...userPosts];
-    for (const a of ARTICLES) if (!ids.has(a.id)) merged.push(a);
+    const merged = userPosts.filter((p) => !gone.has(p.id));
+    for (const a of ARTICLES) if (!ids.has(a.id) && !gone.has(a.id)) merged.push(a);
     return merged;
-  }, [userPosts]);
+  }, [userPosts, deletedPostIds]);
 
   const articles = useMemo(() => allArticles.filter((a) => a.status === "published"), [allArticles]);
 
@@ -348,18 +363,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
   const deleteArticle = useCallback((id: string) => {
-    const src = ARTICLES.find((a) => a.id === id);
-    if (src) {
-      const tomb = { ...src, status: "draft" as const };
-      setUserPosts((list) => {
-        const next = list.some((x) => x.id === id) ? list.map((x) => (x.id === id ? tomb : x)) : [tomb, ...list];
-        persistPosts(next);
-        return next;
-      });
-      return;
-    }
-    deleteUserPost(id);
-  }, [deleteUserPost]);
+    /* Remove any saved copy the desk has, and record the id as deleted so the
+       seeded original is filtered out of the public journal and the Studio. */
+    setUserPosts((list) => {
+      const next = list.filter((x) => x.id !== id);
+      persistPosts(next);
+      return next;
+    });
+    setDeletedPostIds((ids) => {
+      if (ids.includes(id)) return ids;
+      const next = [...ids, id];
+      persistDeletedPostIds(next);
+      return next;
+    });
+  }, []);
 
   /* herbs / products / orders */
   const saveHerb = useCallback((h: Herb) => {
