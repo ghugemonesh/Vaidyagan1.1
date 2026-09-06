@@ -219,6 +219,15 @@ export function Reader({ id }: { id: string }) {
             </div>
           </Reveal>
           <Reveal delay={200}>
+            {article.pdfUrl && (
+              <div className="mt-9 overflow-hidden rounded-xl border border-gold-500/35">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gold-500/25 bg-gold-400/6 px-4 py-2.5">
+                  <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-gold-300">Original document · published as-is</p>
+                  <a href={article.pdfUrl} download={article.pdfName ?? "document.pdf"} className="font-mono text-[9px] uppercase tracking-[0.14em] text-gold-300 underline-offset-4 hover:underline">Download</a>
+                </div>
+                <iframe src={article.pdfUrl} title={article.pdfName ?? "Original document"} className="h-[70vh] w-full bg-white" />
+              </div>
+            )}
             <div ref={bodyRef} className="article-prose dropcap mt-9 text-sand-200/85" dangerouslySetInnerHTML={{ __html: bodyHtml }} />
           </Reveal>
 

@@ -4,9 +4,10 @@ import {
   PenLine, Eye, Plus, Trash2, Send, BookOpen, Download, Lock, Users, Key, Check,
   X, List, Image as ImageIcon, Bold, Italic, Underline, Strikethrough,
   LayoutGrid, ShoppingCart, Shield, Settings as SettingsIcon, User as UserIcon, Leaf,
+  ListTree, Youtube, Maximize2, Minimize2, FileUp, CalendarDays,
 } from "lucide-react";
 import { useApp, auth, readImageFile, SmartImg, Monogram, type StudioUser } from "./lib";
-import { CATEGORIES, KIND_META, articleHtml, authorFor, formatDate, type Article, type Kind } from "./data";
+import { CATEGORIES, IMG, KIND_META, articleHtml, authorFor, formatDate, type Article, type Kind } from "./data";
 import { DoctorProfileTab, blankProfile, profileFor } from "./doctor-profile";
 import { HerbManager } from "./herbs-admin";
 
@@ -262,8 +263,10 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
 
 interface FmtState { bold: boolean; italic: boolean; underline: boolean; strike: boolean; block: string }
 
-function EditorToolbar({ edRef, sync, insertShloka, onOpenImage, refreshFmt }: {
-  edRef: React.RefObject<HTMLDivElement>; sync: () => void; insertShloka: () => void; onOpenImage: () => void; refreshFmt: () => void;
+function EditorToolbar({ edRef, sync, insertShloka, onOpenImage, onOpenVideo, refreshFmt, tocCount, outlineOpen, onToggleOutline, focus, onToggleFocus, words, readMin, mode, setMode }: {
+  edRef: React.RefObject<HTMLDivElement>; sync: () => void; insertShloka: () => void; onOpenImage: () => void; onOpenVideo: () => void; refreshFmt: () => void;
+  tocCount: number; outlineOpen: boolean; onToggleOutline: () => void; focus: boolean; onToggleFocus: () => void;
+  words: number; readMin: number; mode: "write" | "preview"; setMode: (m: "write" | "preview") => void;
 }) {
   const [fmt, setFmt] = useState<FmtState>({ bold: false, italic: false, underline: false, strike: false, block: "p" });
   /* remember the doctor's selection so toolbar clicks (which steal focus) can put it back */
@@ -335,6 +338,12 @@ function EditorToolbar({ edRef, sync, insertShloka, onOpenImage, refreshFmt }: {
         <option value="h3">Heading 3</option>
         <option value="blockquote">Quote</option>
       </select>
+      {/* Contents lives on the menu bar so it stays in reach during long drafts */}
+      <button onClick={onToggleOutline} aria-pressed={outlineOpen} title="Table of contents" aria-label="Table of contents"
+        className={`relative flex h-9 items-center gap-1.5 rounded-lg border px-2.5 transition-all ${outlineOpen ? "border-gold-400 bg-gold-400/15 text-gold-300 shadow-[0_0_12px_rgba(214,180,95,0.25)]" : "border-forest-700 text-sand-200/70 hover:border-gold-400 hover:text-gold-300"}`}>
+        <ListTree size={15} />
+        {tocCount > 0 && <span className="rounded-full bg-gold-400 px-1.5 font-mono text-[8.5px] font-bold leading-4 text-forest-950">{tocCount}</span>}
+      </button>
       <span className="mx-1 h-5 w-px bg-forest-700" />
       <button onMouseDown={(e) => e.preventDefault()} onClick={() => exec("bold")} className={btn(fmt.bold)} title="Bold" aria-label="Bold" aria-pressed={fmt.bold}><Bold size={15} /></button>
       <button onMouseDown={(e) => e.preventDefault()} onClick={() => exec("italic")} className={btn(fmt.italic)} title="Italic" aria-label="Italic" aria-pressed={fmt.italic}><Italic size={15} /></button>
@@ -344,8 +353,20 @@ function EditorToolbar({ edRef, sync, insertShloka, onOpenImage, refreshFmt }: {
       <button onMouseDown={(e) => e.preventDefault()} onClick={() => exec("insertUnorderedList")} className={btn()} title="Bullet list" aria-label="Bullet list"><List size={15} /></button>
       <button onMouseDown={(e) => e.preventDefault()} onClick={insertShloka} className={btn()} title="Insert shloka quote" aria-label="Insert shloka"><BookOpen size={15} /></button>
       <button onMouseDown={(e) => e.preventDefault()} onClick={onOpenImage} className={btn()} title="Insert image" aria-label="Insert image"><ImageIcon size={15} /></button>
+      <button onMouseDown={(e) => e.preventDefault()} onClick={onOpenVideo} className={btn()} title="Embed video (YouTube / Vimeo)" aria-label="Embed video"><Youtube size={15} /></button>
+      <span className="mx-1 h-5 w-px bg-forest-700" />
+      {/* write / preview */}
+      <div className="flex overflow-hidden rounded-lg border border-forest-700">
+        <button onClick={() => setMode("write")} aria-pressed={mode === "write"} className={`px-3 py-2 font-mono text-[9px] uppercase tracking-[0.1em] transition-all ${mode === "write" ? "bg-gold-400 text-forest-950" : "text-sand-200/55 hover:text-sand-100"}`}>Write</button>
+        <button onClick={() => setMode("preview")} aria-pressed={mode === "preview"} className={`px-3 py-2 font-mono text-[9px] uppercase tracking-[0.1em] transition-all ${mode === "preview" ? "bg-gold-400 text-forest-950" : "text-sand-200/55 hover:text-sand-100"}`}>Preview</button>
+      </div>
+      <button onClick={onToggleFocus} aria-pressed={focus} title={focus ? "Exit focus mode (Esc)" : "Focus mode — hide the side panels"} aria-label="Toggle focus mode" className={btn(focus)}>
+        {focus ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+      </button>
       {/* live readout — tells the doctor exactly what the cursor sits in */}
       <span className="ml-auto hidden items-center gap-1 rounded-full border border-forest-700 px-2.5 py-1 font-mono text-[9px] uppercase tracking-[0.12em] text-gold-300/80 md:flex">
+        {words.toLocaleString()} words · {readMin} min
+        <span className="text-sand-200/25">·</span>
         {blockLabel[fmt.block] ?? "Normal text"}
         {fmt.bold && " · B"}{fmt.italic && " · I"}{fmt.underline && " · U"}{fmt.strike && " · S"}
       </span>
@@ -384,6 +405,223 @@ function ImageInsertModal({ onInsert, onClose }: { onInsert: (html: string) => v
   );
 }
 
+/* ------------------------- contents drawer + helpers ------------------------- */
+
+function extractToc(html: string): { level: number; text: string }[] {
+  try {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    return Array.from(doc.querySelectorAll("h2, h3"))
+      .map((n) => ({ level: n.tagName === "H2" ? 2 : 3, text: (n.textContent || "").trim() }))
+      .filter((t) => t.text);
+  } catch { return []; }
+}
+
+function OutlineDrawer({ toc, active, open, onClose, onJump }: {
+  toc: { level: number; text: string }[]; active: number; open: boolean; onClose: () => void; onJump: (i: number) => void;
+}) {
+  return (
+    <AnimatePresence>
+      {open && (
+        <motion.aside
+          initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 24 }} transition={{ duration: 0.22 }}
+          className="absolute bottom-3 right-3 top-14 z-20 flex w-64 max-w-[75%] flex-col overflow-hidden rounded-xl border border-forest-700/70 bg-forest-950/92 shadow-[0_24px_60px_rgba(0,0,0,0.55)] backdrop-blur-xl"
+          role="navigation" aria-label="Table of contents">
+          <div className="flex items-center gap-2 border-b border-forest-800 px-4 py-3">
+            <ListTree size={13} className="text-gold-400" />
+            <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-gold-400">Contents</p>
+            <span className="rounded-full border border-gold-500/40 bg-gold-400/10 px-2 py-0.5 font-mono text-[8.5px] text-gold-300">{toc.length} heading{toc.length === 1 ? "" : "s"}</span>
+            <button onClick={onClose} aria-label="Close contents" className="ml-auto grid h-7 w-7 place-items-center rounded-md border border-forest-700 text-sand-200/60 hover:text-gold-300"><X size={12} /></button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-2.5">
+            {toc.length === 0 ? (
+              <p className="p-4 text-center text-[11.5px] leading-relaxed text-sand-200/50">
+                Add <b className="text-sand-200/80">Heading 2</b> or <b className="text-sand-200/80">Heading 3</b> blocks and this outline builds itself — click any entry to jump straight there.
+              </p>
+            ) : (
+              <ul className="space-y-0.5">
+                {toc.map((t, i) => (
+                  <li key={`${t.text}-${i}`}>
+                    <button onClick={() => onJump(i)}
+                      className={`flex w-full items-center gap-2 rounded-lg border-l-2 py-1.5 pr-2 text-left transition-all ${t.level === 3 ? "pl-7" : "pl-3"} ${
+                        active === i
+                          ? "border-gold-400 bg-gold-400/10 text-gold-300 shadow-[inset_0_0_18px_rgba(214,180,95,0.06)]"
+                          : "border-transparent text-sand-200/60 hover:border-gold-500/40 hover:bg-forest-850 hover:text-sand-100"
+                      }`}>
+                      <span className={`h-1 w-1 shrink-0 rotate-45 ${active === i ? "bg-gold-400" : "bg-forest-600"}`} />
+                      <span className={`truncate text-[12px] leading-snug ${t.level === 2 ? "font-semibold" : ""}`}>{t.text}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </motion.aside>
+      )}
+    </AnimatePresence>
+  );
+}
+
+/* --------------------------------- video embed -------------------------------- */
+
+function toEmbedUrl(url: string): string | null {
+  try {
+    const u = new URL(url.trim());
+    if (u.hostname.includes("youtu")) {
+      const id = u.searchParams.get("v") || u.pathname.split("/").filter(Boolean).pop();
+      return id ? `https://www.youtube.com/embed/${id}` : null;
+    }
+    if (u.hostname.includes("vimeo.com")) {
+      const id = u.pathname.split("/").filter(Boolean).pop();
+      return /^\d+$/.test(id ?? "") ? `https://player.vimeo.com/video/${id}` : null;
+    }
+    return null;
+  } catch { return null; }
+}
+
+function VideoInsertModal({ onInsert, onClose }: { onInsert: (html: string) => void; onClose: () => void }) {
+  const [url, setUrl] = useState("");
+  const embed = toEmbedUrl(url);
+  const insert = () => {
+    if (!embed) return;
+    onInsert(`<div style="margin:1.5rem 0"><iframe src="${embed}" title="Video" style="width:100%;aspect-ratio:16/9;border:0;border-radius:12px" allowfullscreen></iframe></div><p></p>`);
+    onClose();
+  };
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[70] flex items-center justify-center bg-forest-950/85 p-4 backdrop-blur-sm" onClick={onClose}>
+      <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.97, opacity: 0 }} onClick={(e) => e.stopPropagation()} className="w-full max-w-md rounded-2xl border border-forest-700 bg-forest-900 p-6" role="dialog" aria-label="Embed video">
+        <p className="font-display text-xl font-semibold text-sand-100">Embed a video</p>
+        <p className="mt-1.5 text-[12.5px] text-sand-200/50">Paste a YouTube or Vimeo link — it becomes a player inside the essay.</p>
+        <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://www.youtube.com/watch?v=…" autoFocus
+          className="mt-4 w-full rounded-lg border border-forest-700 bg-forest-950/60 px-3.5 py-2.5 text-sm text-sand-100 placeholder:text-sand-200/25 focus:border-gold-400 focus:outline-none" />
+        {url.trim() && !embed && <p className="mt-2 text-[12px] text-ember-300">That doesn't look like a YouTube or Vimeo link yet.</p>}
+        {embed && <p className="mt-2 flex items-center gap-1.5 text-[12px] text-kapha-300"><Check size={13} /> Recognised — ready to embed.</p>}
+        <div className="mt-5 flex gap-2.5">
+          <button onClick={insert} disabled={!embed} className="gold-sheen flex-1 rounded-full bg-gold-400 py-2.5 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-forest-950 hover:bg-gold-300 disabled:opacity-35">Embed video</button>
+          <button onClick={onClose} className="rounded-full border border-forest-700 px-5 py-2.5 font-mono text-[10px] uppercase tracking-[0.14em] text-sand-200/60 hover:text-sand-100">Cancel</button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+/* ------------------------------- manuscript import ---------------------------- */
+
+interface ParsedManuscript { title: string; html: string; stats: { headings: number; paras: number; words: number } }
+
+async function parseManuscript(file: File): Promise<ParsedManuscript> {
+  const fallbackTitle = file.name.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ").trim() || "Imported manuscript";
+  const ext = (file.name.split(".").pop() || "").toLowerCase();
+  let html = "";
+  if (ext === "docx" || ext === "doc") {
+    const mammoth = await import("mammoth");
+    const buf = await file.arrayBuffer();
+    const res = await mammoth.convertToHtml({ arrayBuffer: buf });
+    html = res.value || "";
+  } else if (ext === "pdf") {
+    const pdfjs: any = await import("pdfjs-dist");
+    try {
+      const workerUrl = (await import("pdfjs-dist/build/pdf.worker.min.mjs?url")).default;
+      pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+    } catch { /* bundled fallback */ }
+    const buf = await file.arrayBuffer();
+    const doc = await pdfjs.getDocument({ data: buf }).promise;
+    const paras: string[] = [];
+    for (let i = 1; i <= doc.numPages; i++) {
+      try {
+        const page = await doc.getPage(i);
+        const tc = await page.getTextContent();
+        const text = tc.items.map((it: any) => it.str).join(" ").replace(/\s+/g, " ").trim();
+        if (text) paras.push(`<p>${text.replace(/</g, "&lt;")}</p>`);
+      } catch { /* skip unreadable page */ }
+    }
+    html = paras.join("\n");
+  } else {
+    const text = await file.text();
+    html = text.split(/\n{2,}|\n/).map((p) => p.trim()).filter(Boolean)
+      .map((p) => `<p>${p.replace(/</g, "&lt;")}</p>`).join("\n");
+  }
+  if (!html.trim()) html = "<p></p>";
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const stats = {
+    headings: doc.querySelectorAll("h1,h2,h3,h4").length,
+    paras: doc.querySelectorAll("p,li").length,
+    words: (doc.body.textContent || "").split(/\s+/).filter(Boolean).length,
+  };
+  const firstHead = doc.querySelector("h1,h2")?.textContent?.trim();
+  return { title: firstHead || fallbackTitle, html, stats };
+}
+
+function ImportModal({ onCreate, onAsIs, onClose }: {
+  onCreate: (p: ParsedManuscript) => void;
+  onAsIs: (a: { name: string; dataUrl: string; title: string }) => void;
+  onClose: () => void;
+}) {
+  const { toast } = useApp();
+  const [parsed, setParsed] = useState<ParsedManuscript | null>(null);
+  const [pdfFile, setPdfFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const pick = async (f: File | null) => {
+    if (!f) return;
+    const ext = (f.name.split(".").pop() || "").toLowerCase();
+    if (!["pdf", "docx", "doc", "txt", "md"].includes(ext)) { toast("Use a PDF, Word (.docx), .txt or .md file"); return; }
+    setBusy(true);
+    setParsed(null);
+    setPdfFile(ext === "pdf" ? f : null);
+    try {
+      setParsed(await parseManuscript(f));
+    } catch {
+      toast("Couldn't read that file — try exporting it as .docx or .txt");
+    }
+    setBusy(false);
+  };
+
+  const publishAsIs = () => {
+    if (!pdfFile) return;
+    const r = new FileReader();
+    r.onload = () => onAsIs({ name: pdfFile.name, dataUrl: String(r.result), title: parsed?.title || pdfFile.name.replace(/\.pdf$/i, "") });
+    r.onerror = () => toast("Couldn't read that PDF");
+    r.readAsDataURL(pdfFile);
+  };
+
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[70] flex items-center justify-center bg-forest-950/85 p-4 backdrop-blur-sm" onClick={onClose}>
+      <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.97, opacity: 0 }} onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-lg rounded-2xl border border-forest-700 bg-forest-900 p-6 sm:p-7" role="dialog" aria-label="Import a manuscript">
+        <p className="font-display text-xl font-semibold text-sand-100">Import a manuscript</p>
+        <p className="mt-1.5 text-[12.5px] leading-relaxed text-sand-200/50">Drop in a PDF, Word document or text file — Vaidyagan reads it and structures it into an editable draft.</p>
+
+        <label className="mt-5 flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-forest-600 py-9 transition-all hover:border-gold-400 hover:bg-gold-400/4">
+          {busy ? (
+            <><span className="animate-spin-fast h-6 w-6 rounded-full border-2 border-gold-400 border-t-transparent" /><span className="font-mono text-[10px] uppercase tracking-[0.16em] text-gold-300">Reading…</span></>
+          ) : (
+            <><FileUp size={22} className="text-gold-400/80" /><span className="font-mono text-[10px] uppercase tracking-[0.16em] text-sand-200/60">Click to choose a file</span><span className="text-[11px] text-sand-200/35">.pdf · .docx · .txt · .md</span></>
+          )}
+          <input type="file" accept=".pdf,.docx,.doc,.txt,.md" className="hidden" onChange={(e) => { void pick(e.target.files?.[0] ?? null); e.target.value = ""; }} />
+        </label>
+
+        {parsed && (
+          <div className="mt-5 rounded-xl border border-kapha-500/35 bg-kapha-500/6 p-4">
+            <p className="flex items-center gap-2 text-[13px] font-semibold text-kapha-300"><Check size={14} /> “{parsed.title}”</p>
+            <p className="mt-1 font-mono text-[9.5px] uppercase tracking-[0.14em] text-sand-200/50">
+              {parsed.stats.headings} headings · {parsed.stats.paras} paragraphs · {parsed.stats.words.toLocaleString()} words
+            </p>
+            <div className="mt-3.5 flex flex-wrap gap-2.5">
+              <button onClick={() => onCreate(parsed)} className="gold-sheen flex items-center gap-2 rounded-full bg-gold-400 px-5 py-2.5 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-forest-950 hover:bg-gold-300"><PenLine size={13} /> Open as editable draft</button>
+              {pdfFile && (
+                <button onClick={publishAsIs} className="flex items-center gap-2 rounded-full border border-gold-500/50 px-5 py-2.5 font-mono text-[10px] uppercase tracking-[0.14em] text-gold-300 hover:bg-gold-400 hover:text-forest-950"><FileUp size={13} /> Publish PDF as-is</button>
+              )}
+            </div>
+            {pdfFile && <p className="mt-2 text-[11px] leading-relaxed text-sand-200/45">“As-is” attaches the original file untouched — readers view and download the exact document.</p>}
+          </div>
+        )}
+
+        <button onClick={onClose} className="mt-5 w-full rounded-full border border-forest-700 py-2.5 font-mono text-[10px] uppercase tracking-[0.14em] text-sand-200/60 hover:text-sand-100">Close</button>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 /* ---------------------------------- studio ---------------------------------- */
 
 type TabKey = "essays" | "blogs" | "herbs" | "store" | "review" | "profile";
@@ -410,8 +648,44 @@ export function Studio() {
   const [kind, setKind] = useState<Kind>("blog");
   const [mode, setMode] = useState<"write" | "preview">("write");
   const edRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const [html, setHtml] = useState("");
   const [hydratedFor, setHydratedFor] = useState<string | null>(null);
+  const [focus, setFocus] = useState(false);
+  const [outlineOpen, setOutlineOpen] = useState(false);
+  const [videoOpen, setVideoOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [cover, setCover] = useState("");
+  const [scheduleDate, setScheduleDate] = useState("");
+  const [pdfAttachment, setPdfAttachment] = useState<{ name: string; dataUrl: string } | null>(null);
+  const [activeHeading, setActiveHeading] = useState(-1);
+
+  /* Esc exits focus mode */
+  useEffect(() => {
+    if (!focus) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setFocus(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [focus]);
+
+  const toc = useMemo(() => extractToc(html), [html]);
+  const words = useMemo(() => html.replace(/<[^>]*>/g, " ").split(/\s+/).filter(Boolean).length, [html]);
+  const readMin = Math.max(1, Math.round(words / 210));
+
+  const trackHeading = useCallback(() => {
+    const box = scrollRef.current;
+    if (!box) return;
+    const heads = Array.from(box.querySelectorAll("h2, h3")) as HTMLElement[];
+    let idx = -1;
+    heads.forEach((h, i) => { if (h.getBoundingClientRect().top < window.innerHeight * 0.55) idx = i; });
+    setActiveHeading((prev) => (prev === idx ? prev : idx));
+  }, []);
+
+  const jumpToHeading = useCallback((i: number) => {
+    const heads = scrollRef.current?.querySelectorAll("h2, h3");
+    heads?.[i]?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setActiveHeading(i);
+  }, []);
 
   const isSuper = member?.role === "superadmin";
   const myArticles = useMemo(() => {
@@ -435,9 +709,13 @@ export function Studio() {
     setDoshas(selected.doshas);
     setSymptoms(selected.symptoms.join(", "));
     setKind(selected.kind);
-    setHtml(selected.html && selected.html.trim() ? selected.html : articleHtml(selected));
+    setCover(selected.cover ?? "");
+    setPdfAttachment(selected.pdfUrl ? { name: selected.pdfName ?? "Original document.pdf", dataUrl: selected.pdfUrl } : null);
+    setScheduleDate(selected.status === "scheduled" ? selected.date : "");
+    const body = selected.html && selected.html.trim() ? selected.html : articleHtml(selected);
+    setHtml(body);
     setMode("write");
-    if (edRef.current) edRef.current.innerHTML = selected.html && selected.html.trim() ? selected.html : articleHtml(selected);
+    if (edRef.current) edRef.current.innerHTML = body;
     setHydratedFor(selected.id);
   }, [selected, hydratedFor]);
 
@@ -448,11 +726,13 @@ export function Studio() {
     slug: (selected?.slug) || title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "new-draft",
     title: title || "Untitled",
     subtitle, summary,
-    cover: selected?.cover ?? "",
+    cover: cover || selected?.cover || "",
     categoryId, doshas, symptoms: symptoms.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
     authorId: selected?.authorId ?? member?.id ?? "root",
     date: selected?.date ?? new Date().toISOString().slice(0, 10),
     views: selected?.views ?? 0, kind, blocks: [], html, status,
+    pdfUrl: pdfAttachment?.dataUrl ?? selected?.pdfUrl,
+    pdfName: pdfAttachment?.name ?? selected?.pdfName,
     caseMeta: selected?.caseMeta, researchMeta: selected?.researchMeta,
   });
 
@@ -479,6 +759,51 @@ export function Studio() {
     setSelectedId(a.id);
     logActivity("submit", `submitted "${a.title}" for review`, a.title);
     toast("Submitted — a superadmin will review it");
+  };
+  const onSchedule = () => {
+    if (!scheduleDate) { toast("Pick a release date on the right first"); return; }
+    if (!title.trim()) { toast("Give the publication a title first"); return; }
+    const a = buildArticle("scheduled");
+    a.date = scheduleDate;
+    saveDraft(a);
+    setSelectedId(a.id);
+    logActivity("publish", `scheduled "${a.title}" for ${scheduleDate}`, a.title);
+    toast(`Scheduled for ${formatDate(scheduleDate)}`);
+  };
+  const createFromImport = (p: ParsedManuscript) => {
+    const a: Article = {
+      id: `user-${Date.now()}`,
+      slug: p.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "imported",
+      title: p.title, subtitle: "Imported manuscript",
+      summary: p.html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 180),
+      cover: cover || "", categoryId, doshas, authorId: member?.id ?? "root",
+      date: new Date().toISOString().slice(0, 10), views: 0, symptoms: [], kind: "blog",
+      blocks: [], html: p.html, status: "draft",
+    };
+    saveDraft(a);
+    setSelectedId(a.id);
+    setHydratedFor(null);
+    setImportOpen(false);
+    setTab("essays");
+    toast(`Imported — ${p.stats.headings} headings and ${p.stats.words.toLocaleString()} words structured into a draft`);
+  };
+  const createFromAsIs = (x: { name: string; dataUrl: string; title: string }) => {
+    const a: Article = {
+      id: `user-${Date.now()}`,
+      slug: x.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "document",
+      title: x.title, subtitle: "Published as-is — the original, unedited document",
+      summary: `${x.name} — shared exactly as received. Nothing was altered or reformatted.`,
+      cover: cover || "", categoryId, doshas, authorId: member?.id ?? "root",
+      date: new Date().toISOString().slice(0, 10), views: 0, symptoms: [], kind: "blog",
+      blocks: [], html: `<p><em>This document is published exactly as received — read the original below, or download it.</em></p>`,
+      pdfUrl: x.dataUrl, pdfName: x.name, status: "draft",
+    };
+    saveDraft(a);
+    setSelectedId(a.id);
+    setHydratedFor(null);
+    setImportOpen(false);
+    setTab("essays");
+    toast("PDF attached as-is — nothing was altered. Publish when ready.");
   };
   const newDraft = () => {
     const a: Article = {
@@ -662,11 +987,16 @@ export function Studio() {
 
         {/* blogging space */}
         {tab === "essays" && (
-          <div className="grid gap-6 rounded-b-xl rounded-tr-xl border border-forest-800 bg-forest-900/40 p-4 lg:grid-cols-[290px_minmax(0,1fr)_280px] lg:p-6">
-            {/* left — article list */}
+          <div className={`grid gap-6 rounded-b-xl rounded-tr-xl border border-forest-800 bg-forest-900/40 p-4 transition-all duration-300 lg:p-6 ${focus ? "lg:grid-cols-1" : "lg:grid-cols-[290px_minmax(0,1fr)_280px]"}`}>
+            {/* left — article list (hidden in focus mode) */}
+            {!focus && (
             <aside className="flex max-h-[44vh] flex-col rounded-xl border border-forest-800 bg-forest-900/70 lg:max-h-[calc(100vh-220px)]">
               <div className="flex items-center justify-between gap-2 border-b border-forest-800 px-4 py-3">
                 <p className="font-mono text-[9.5px] uppercase tracking-[0.2em] text-gold-400">{isSuper ? "All articles" : "Your articles"}</p>
+                <button onClick={() => setImportOpen(true)} title="Import a PDF / Word manuscript" aria-label="Import manuscript"
+                  className="flex items-center gap-1.5 rounded-full border border-forest-700 px-3 py-1.5 font-mono text-[8.5px] uppercase tracking-[0.1em] text-sand-200/60 transition-all hover:border-gold-400 hover:text-gold-300">
+                  <FileUp size={12} /> Import
+                </button>
               </div>
               <div className="border-b border-forest-800 px-4 py-2.5">
                 <p className="mb-1.5 font-mono text-[7.5px] uppercase tracking-[0.16em] text-sand-200/30">New draft type</p>
@@ -709,16 +1039,44 @@ export function Studio() {
                 {myArticles.length === 0 && <p className="p-4 text-center text-[12px] text-sand-200/40">No posts yet — open a fresh draft.</p>}
               </div>
             </aside>
+            )}
 
             {/* centre — editor */}
             <div className="relative flex max-h-[calc(100vh-190px)] min-h-[540px] flex-col overflow-hidden rounded-xl border border-forest-800 bg-forest-900/80">
-              <EditorToolbar edRef={edRef} sync={sync} insertShloka={insertShloka} onOpenImage={() => setImgOpen(true)} refreshFmt={() => {}} />
-              <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
-                <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Essay title…" className="w-full bg-transparent font-display text-3xl font-semibold text-sand-100 placeholder:text-sand-200/25 focus:outline-none sm:text-4xl" />
-                <input value={subtitle} onChange={(e) => setSubtitle(e.target.value)} placeholder="A one-line subtitle…" className="mt-2 w-full bg-transparent font-display text-lg italic text-sand-200/60 placeholder:text-sand-200/20 focus:outline-none" />
-                <div className="gold-rule my-5" />
-                <div ref={edRef} contentEditable data-placeholder="Begin writing… use the toolbar for headings, shlokas, lists and images."
-                  onInput={sync} className="editor-surface min-h-[340px] text-[15.5px] leading-[1.9] text-sand-200/90" />
+              <EditorToolbar edRef={edRef} sync={sync} insertShloka={insertShloka}
+                onOpenImage={() => setImgOpen(true)} onOpenVideo={() => setVideoOpen(true)} refreshFmt={trackHeading}
+                tocCount={toc.length} outlineOpen={outlineOpen} onToggleOutline={() => setOutlineOpen(!outlineOpen)}
+                focus={focus} onToggleFocus={() => setFocus(!focus)}
+                words={words} readMin={readMin} mode={mode} setMode={setMode} />
+              <OutlineDrawer toc={toc} active={activeHeading} open={outlineOpen} onClose={() => setOutlineOpen(false)} onJump={jumpToHeading} />
+              <div ref={scrollRef} onScroll={trackHeading} className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+                {pdfAttachment && (
+                  <div className="mb-5 flex flex-wrap items-center gap-3 rounded-xl border border-gold-500/40 bg-gold-400/6 px-4 py-3">
+                    <FileUp size={16} className="shrink-0 text-gold-300" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[13px] font-semibold text-sand-100">{pdfAttachment.name}</p>
+                      <p className="font-mono text-[8.5px] uppercase tracking-[0.14em] text-gold-400/80">Original attached — will publish as-is</p>
+                    </div>
+                    <button onClick={() => setPdfAttachment(null)} className="shrink-0 font-mono text-[9px] uppercase tracking-[0.12em] text-sand-200/50 transition-colors hover:text-ember-300">Remove</button>
+                  </div>
+                )}
+                {mode === "preview" ? (
+                  <div className="article-prose mx-auto max-w-2xl text-sand-200/85">
+                    <h1 className="font-display text-4xl font-semibold leading-tight text-sand-100">{title || "Untitled"}</h1>
+                    {subtitle && <p className="mt-2 font-display text-lg italic text-sand-200/60">{subtitle}</p>}
+                    <div className="gold-rule my-6" />
+                    {summary && <p className="border-l-2 border-forest-700 pl-5 text-[16px] italic leading-relaxed text-sand-200/70">{summary}</p>}
+                    <div className="mt-6" dangerouslySetInnerHTML={{ __html: html || "<p><em>Nothing to preview yet — switch to Write.</em></p>" }} />
+                  </div>
+                ) : (
+                  <>
+                    <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Essay title…" className="w-full bg-transparent font-display text-3xl font-semibold text-sand-100 placeholder:text-sand-200/25 focus:outline-none sm:text-4xl" />
+                    <input value={subtitle} onChange={(e) => setSubtitle(e.target.value)} placeholder="A one-line subtitle…" className="mt-2 w-full bg-transparent font-display text-lg italic text-sand-200/60 placeholder:text-sand-200/20 focus:outline-none" />
+                    <div className="gold-rule my-5" />
+                    <div ref={edRef} contentEditable data-placeholder="Begin writing… use the toolbar for headings, shlokas, lists and images."
+                      onInput={() => { sync(); trackHeading(); }} className="editor-surface min-h-[340px] text-[15.5px] leading-[1.9] text-sand-200/90" />
+                  </>
+                )}
               </div>
               <div className="flex flex-wrap items-center gap-2.5 border-t border-forest-800 bg-forest-850/80 px-4 py-3.5">
                 <button onClick={onSave} className="flex items-center gap-2 rounded-full border border-forest-600 px-5 py-2.5 font-mono text-[10.5px] uppercase tracking-[0.16em] text-sand-200 transition-all hover:border-gold-400 hover:text-gold-300"><Download size={14} /> {selected?.status === "published" ? "Save changes" : "Save draft"}</button>
@@ -733,7 +1091,8 @@ export function Studio() {
               </div>
             </div>
 
-            {/* right — article settings */}
+            {/* right — article settings (hidden in focus mode) */}
+            {!focus && (
             <aside className="max-h-[46vh] space-y-5 overflow-y-auto rounded-xl border border-forest-800 bg-forest-900/70 p-5 lg:max-h-[calc(100vh-220px)]">
               <p className="flex items-center gap-2 font-mono text-[9.5px] uppercase tracking-[0.2em] text-gold-400"><SettingsIcon size={13} /> Article settings</p>
               <div>
@@ -767,11 +1126,39 @@ export function Studio() {
                 <label className="mb-1.5 block font-mono text-[8.5px] uppercase tracking-[0.16em] text-sand-200/45">Symptom tags (comma-separated)</label>
                 <input value={symptoms} onChange={(e) => setSymptoms(e.target.value)} placeholder="sleep, anxiety, fatigue" className="w-full rounded-lg border border-forest-700 bg-forest-950/60 px-3 py-2.5 text-[13px] text-sand-100 placeholder:text-sand-200/25 focus:border-gold-400 focus:outline-none" />
               </div>
+              <div>
+                <label className="mb-1.5 block font-mono text-[8.5px] uppercase tracking-[0.16em] text-sand-200/45">Cover image</label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {Object.values(IMG).slice(0, 6).map((src) => (
+                    <button key={src} onClick={() => setCover(src)} aria-label="Choose this cover"
+                      className={`overflow-hidden rounded-lg border-2 transition-all ${cover === src ? "border-gold-400 shadow-[0_0_14px_rgba(214,180,95,0.3)]" : "border-transparent opacity-70 hover:opacity-100"}`}>
+                      <SmartImg src={src} alt="" className="aspect-[16/10] w-full object-cover" />
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-2 flex items-center gap-2">
+                  <input value={cover.startsWith("data:") ? "(uploaded image)" : cover} onChange={(e) => setCover(e.target.value)} placeholder="…or paste an image URL"
+                    className="min-w-0 flex-1 rounded-lg border border-forest-700 bg-forest-950/60 px-3 py-2 text-[12px] text-sand-100 placeholder:text-sand-200/25 focus:border-gold-400 focus:outline-none" />
+                  {cover && <button onClick={() => setCover("")} className="shrink-0 font-mono text-[8.5px] uppercase tracking-[0.1em] text-sand-200/50 transition-colors hover:text-ember-300">No cover</button>}
+                </div>
+              </div>
+              <div>
+                <label className="mb-1.5 block font-mono text-[8.5px] uppercase tracking-[0.16em] text-sand-200/45">Schedule release</label>
+                <div className="flex items-center gap-2">
+                  <input type="date" value={scheduleDate} onChange={(e) => setScheduleDate(e.target.value)}
+                    className="min-w-0 flex-1 rounded-lg border border-forest-700 bg-forest-950/60 px-3 py-2 text-[12px] text-sand-100 focus:border-gold-400 focus:outline-none" />
+                  <button onClick={onSchedule} title="Save this article as scheduled"
+                    className="flex shrink-0 items-center gap-1.5 rounded-lg border border-steel-400/50 px-3 py-2 font-mono text-[8.5px] uppercase tracking-[0.1em] text-steel-300 transition-all hover:bg-steel-400/10">
+                    <CalendarDays size={12} /> Schedule
+                  </button>
+                </div>
+              </div>
               <div className="rounded-lg border border-forest-800 bg-forest-850/50 p-3.5">
                 <p className="font-mono text-[8.5px] uppercase tracking-[0.16em] text-sand-200/45">Status</p>
                 <div className="mt-1.5 flex items-center gap-2">{selected ? statusPill(selected.status) : <span className="font-mono text-[9px] text-sand-200/40">unsaved draft</span>}</div>
               </div>
             </aside>
+            )}
           </div>
         )}
       </main>
@@ -781,6 +1168,8 @@ export function Studio() {
         {deskOpen && isSuper && <DeskDoctorsModal onClose={() => setDeskOpen(false)} />}
         {settingsOpen && isSuper && <SettingsModal onClose={() => setSettingsOpen(false)} />}
         {imgOpen && <ImageInsertModal onInsert={(h) => { try { edRef.current?.focus(); document.execCommand("insertHTML", false, h); } catch { /* ignore */ } sync(); }} onClose={() => setImgOpen(false)} />}
+        {videoOpen && <VideoInsertModal onInsert={(h) => { try { edRef.current?.focus(); document.execCommand("insertHTML", false, h); } catch { /* ignore */ } sync(); }} onClose={() => setVideoOpen(false)} />}
+        {importOpen && <ImportModal onCreate={createFromImport} onAsIs={createFromAsIs} onClose={() => setImportOpen(false)} />}
       </AnimatePresence>
     </div>
   );
