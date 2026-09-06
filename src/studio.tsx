@@ -4,7 +4,7 @@ import {
   PenLine, Eye, Plus, Trash2, Send, BookOpen, Download, Lock, Users, Key, Check,
   X, List, Image as ImageIcon, Bold, Italic, Underline, Strikethrough,
   LayoutGrid, ShoppingCart, Shield, Settings as SettingsIcon, User as UserIcon, Leaf,
-  ListTree, Youtube, Maximize2, Minimize2, FileUp, CalendarDays,
+  ListTree, Youtube, Maximize2, Minimize2, FileUp, CalendarDays, ShieldCheck,
 } from "lucide-react";
 import { useApp, auth, readImageFile, SmartImg, Monogram, type StudioUser, type StudioPerms } from "./lib";
 import { CATEGORIES, IMG, KIND_META, articleHtml, authorFor, formatDate, type Article, type Kind } from "./data";
@@ -156,6 +156,13 @@ function MembersModal({ onClose }: { onClose: () => void }) {
                 ) : (
                   <button onClick={() => { setResetFor(u.id); setNewPass(""); }} title="Reset password" aria-label={`Reset password for ${u.name}`} className="grid h-8 w-8 place-items-center rounded-full border border-forest-700 text-sand-200/60 hover:border-gold-400 hover:text-gold-300"><Key size={13} /></button>
                 )}
+                <button
+                  onClick={() => setOpenPerms(showPerms ? null : u.id)}
+                  aria-pressed={showPerms}
+                  title="Grant / revoke permissions"
+                  className={`flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 font-mono text-[9px] uppercase tracking-[0.12em] transition-all ${showPerms ? "border-gold-400 bg-gold-400/15 text-gold-300" : "border-forest-700 text-sand-200/60 hover:border-gold-400 hover:text-gold-300"}`}>
+                  <ShieldCheck size={12} /> {showPerms ? "Hide" : "Permissions"}
+                </button>
                 {u.id !== "root" && (
                   <>
                     <button onClick={() => { auth.setMemberStatus(u.id, !u.active); logActivity("member", u.active ? `suspended ${u.name}` : `reactivated ${u.name}`); toast(u.active ? `${u.name} suspended` : `${u.name} reactivated`); refresh(); }}
@@ -173,7 +180,26 @@ function MembersModal({ onClose }: { onClose: () => void }) {
                 )}
               </div>
             </div>
-          ))}
+
+            {/* superadmin grant / revoke panel */}
+            {showPerms && (
+              <div className="mt-3 space-y-2 border-t border-forest-800 pt-3">
+                <p className="font-mono text-[8.5px] uppercase tracking-[0.22em] text-gold-400/80">
+                  Permissions — changes apply instantly{u.id === "root" ? " · founder always keeps everything" : ""}
+                </p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <PermSwitch on={u.canPublishDirect} disabled={isRoot} label="Publish directly" desc="Off → posts go to the Needs Review queue." onToggle={(b) => setPerm(u, "canPublishDirect", b, "Publish directly")} />
+                  <PermSwitch on={u.canEditPublished} disabled={isRoot} label="Edit own published posts" desc="Off → their live articles are locked." onToggle={(b) => setPerm(u, "canEditPublished", b, "Edit published")} />
+                  <PermSwitch on={u.canDeletePublished} disabled={isRoot} label="Delete own published posts" desc="Off → no delete button on live work." onToggle={(b) => setPerm(u, "canDeletePublished", b, "Delete published")} />
+                  <PermSwitch on={u.storeAccess} disabled={isRoot} label="Store tab in Studio" desc="Products, orders & payouts." onToggle={(b) => setPerm(u, "storeAccess", b, "Store access")} />
+                  <PermSwitch on={u.herbAccess} disabled={isRoot} label="Herb Index tab" desc="Add & edit public herb monographs." onToggle={(b) => setPerm(u, "herbAccess", b, "Herb Index access")} />
+                  <PermSwitch on={u.consoleAccess} disabled={isRoot} label="Admin Console access" desc="The full Wix/Shopify-style dashboard." onToggle={(b) => setPerm(u, "consoleAccess", b, "Admin Console access")} />
+                </div>
+              </div>
+            )}
+            </div>
+            );
+          })}
         </div>
 
         <div className="mt-6 rounded-xl border border-gold-500/35 bg-gold-400/5 p-5">
@@ -906,10 +932,12 @@ export function Studio() {
           <div className="ml-auto flex flex-wrap items-center gap-2.5">
             {isSuper && (
               <>
-                <button onClick={() => navigate({ name: "console" })} title="Open the full Admin Console"
-                  className="gold-sheen flex items-center gap-2 rounded-full bg-gold-400 px-5 py-2.5 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-forest-950 hover:bg-gold-300">
-                  <Shield size={14} /> Admin Console
-                </button>
+                {(isSuper || member?.consoleAccess) && (
+                  <button onClick={() => navigate({ name: "console" })} title="Open the full Admin Console"
+                    className="gold-sheen flex items-center gap-2 rounded-full bg-gold-400 px-5 py-2.5 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-forest-950 hover:bg-gold-300">
+                    <Shield size={14} /> Admin Console
+                  </button>
+                )}
                 <button onClick={() => setDeskOpen(true)} title="Manage the public desk roster" className="flex items-center gap-2 rounded-full border border-kapha-500/50 px-4 py-2.5 font-mono text-[10px] uppercase tracking-[0.14em] text-kapha-300 hover:bg-kapha-500/10"><Users size={14} /> Desk doctors</button>
                 <button onClick={() => setMembersOpen(true)} className="flex items-center gap-2 rounded-full border border-gold-500/60 px-4 py-2.5 font-mono text-[10px] uppercase tracking-[0.14em] text-gold-300 hover:bg-gold-400 hover:text-forest-950"><Users size={14} /> Members</button>
                 <button onClick={() => setSettingsOpen(true)} title="Master switches" aria-label="Studio settings" className="grid h-10 w-10 place-items-center rounded-full border border-forest-700 text-sand-200/70 transition-all duration-300 hover:rotate-45 hover:border-gold-400 hover:text-gold-300"><SettingsIcon size={16} /></button>

@@ -1,983 +1,832 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
-import {
-  LayoutDashboard, Package, ShoppingBag, Users, FileText, Tags, BarChart3, Settings as SettingsIcon,
-  ShieldCheck, Search, Bell, ChevronLeft, ChevronRight, LogOut, Database, Check, X, Plus, Trash2,
-  Pencil, Download, Upload, AlertTriangle, TrendingUp, Truck, Printer, Eye, EyeOff, RefreshCw,
-} from "lucide-react";
-import { useApp, auth, SmartImg, Monogram, type StudioUser } from "./lib";
-import { PRODUCTS, ORDER_META, ORDER_FLOW, formatDate, CATEGORIES, type Order, type Product, type OrderStatus } from "./data";
+/* =============================================================================
+   Vaidyagan Admin Console — the shell (Wix/Shopify-style chrome)
+   -----------------------------------------------------------------------------
+   Collapsible sidebar · mobile drawer · global search · notification bell ·
+   avatar menu · Demo/Live badge on every page · role-guarded navigation.
+   Data flows through the async facade (./console/data) so Demo ⇄ Live is a
+   badge change, nothing visual. Opens from the Studio header as its own view.
+   ========================================================================== */
 
-type CRole = "superadmin" | "editor" | "viewer";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { useApp, auth, SmartImg, type StudioUser } from "./lib";
+import {
+  BRAND_LOGO_URL, CATEGORIES, ORDER_FLOW, ORDER_META, formatDate,
+  type Order, type OrderStatus, type Product,
+} from "./data";
+import { getConsoleMode, hasFirebaseConfig, seedDemoAnalytics } from "./console/db";
+import {
+  cancelOrderRestockF, deleteProductF, listNotificationsF, loadActivity, loadDiscountsF, loadOrders,
+  loadProducts, loadSearchIndex, markAllReadF, pushNotificationF, saveDiscountF, saveOrderF, saveProductF,
+  type ActivityRecord, type SearchIndex,
+} from "./console/data";
+import {
+  ConfirmChip, Drawer, EmptyState, ErrorState, ListSkeleton, StatCard, StatusBadge, Switch, cInp, cLbl, timeAgo,
+} from "./console/ui";
+import {
+  AnalyticsPage, ContentPage, CustomersPage, MarketingPage, SettingsPage, StaffPage, useAsync, type CRole,
+} from "./console-pages";
+import {
+  BarChart3, Bell, Check, ChevronLeft, Database, Download, ExternalLink, FileText, LayoutDashboard,
+  Lock, LogOut, Megaphone, Menu, Minus, Package, Plus, Printer, RefreshCw, Search, Send, Settings as SettingsIcon,
+  ShieldCheck, ShoppingCart, Star, Users as UsersIcon, Zap, type LucideIcon,
+} from "lucide-react";
+import { readImageFile } from "./lib";
+
 type Page = "home" | "orders" | "products" | "customers" | "staff" | "content" | "marketing" | "analytics" | "settings";
 
-/* ============================ firebase config store =========================== */
+const PAGES: { key: Page; label: string; Icon: LucideIcon }[] = [
+  { key: "home", label: "Home", Icon: LayoutDashboard },
+  { key: "orders", label: "Orders", Icon: ShoppingCart },
+  { key: "products", label: "Products", Icon: Package },
+  { key: "customers", label: "Customers", Icon: UsersIcon },
+  { key: "staff", label: "Staff & Access", Icon: ShieldCheck },
+  { key: "content", label: "Content", Icon: FileText },
+  { key: "marketing", label: "Marketing", Icon: Megaphone },
+  { key: "analytics", label: "Analytics", Icon: BarChart3 },
+  { key: "settings", label: "Settings", Icon: SettingsIcon },
+];
 
-const FB_CONFIG_KEY = "vaidyagan_firebase_config";
-const FB_MODE_KEY = "vaidyagan_console_mode";
+const PAGE_ACCESS: Record<Page, CRole[]> = {
+  home: ["superadmin", "editor", "viewer"],
+  orders: ["superadmin", "editor"],
+  products: ["superadmin", "editor"],
+  customers: ["superadmin", "editor"],
+  staff: ["superadmin"],
+  content: ["superadmin", "editor"],
+  marketing: ["superadmin", "editor"],
+  analytics: ["superadmin", "editor", "viewer"],
+  settings: ["superadmin"],
+};
 
-interface FBConfig { apiKey: string; authDomain: string; projectId: string; storageBucket: string; messagingSenderId: string; appId: string }
-const EMPTY_FB: FBConfig = { apiKey: "", authDomain: "", projectId: "", storageBucket: "", messagingSenderId: "", appId: "" };
+const inr = (n: number) => `₹${n.toLocaleString("en-IN")}`;
 
-function loadFB(): FBConfig {
-  try {
-    const raw = localStorage.getItem(FB_CONFIG_KEY);
-    if (raw) return { ...EMPTY_FB, ...(JSON.parse(raw) as Partial<FBConfig>) };
-  } catch { /* fresh */ }
-  return EMPTY_FB;
-}
-function saveFB(c: FBConfig) { try { localStorage.setItem(FB_CONFIG_KEY, JSON.stringify(c)); } catch { /* ignore */ } }
-function getMode(): "demo" | "live" {
-  try { return (localStorage.getItem(FB_MODE_KEY) as "demo" | "live") || "demo"; } catch { return "demo"; }
-}
-function setMode(m: "demo" | "live") { try { localStorage.setItem(FB_MODE_KEY, m); } catch { /* ignore */ } }
-
-export const FIRESTORE_RULES = `rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /admin_users/{userId} {
-      allow read, write: if request.auth != null;
-    }
-    match /admin_activity/{docId} {
-      allow read, write: if request.auth != null;
-    }
-    match /orders/{orderId} {
-      allow read, write: if request.auth != null;
-    }
-    match /products/{productId} {
-      allow read: if true;
-      allow write: if request.auth != null;
-    }
-    match /customers/{customerId} {
-      allow read, write: if request.auth != null;
-    }
-  }
-}`;
-
-/* ================================ ui helpers ================================ */
-
-function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
-  return <div className={`rounded-xl border border-forest-800 bg-forest-900/70 ${className}`}>{children}</div>;
-}
-function PageHead({ title, sub, children }: { title: string; sub: string; children?: React.ReactNode }) {
-  return (
-    <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-      <div>
-        <h1 className="font-display text-3xl font-semibold text-sand-100">{title}</h1>
-        <p className="mt-1 text-[13.5px] text-sand-200/55">{sub}</p>
-      </div>
-      {children}
-    </div>
-  );
-}
-function EmptyState({ icon: Icon, title, hint }: { icon: any; title: string; hint: string }) {
-  return (
-    <div className="rounded-xl border border-dashed border-forest-700 p-14 text-center">
-      <Icon size={32} className="mx-auto text-forest-600" />
-      <p className="mt-4 font-display text-xl text-sand-200/70">{title}</p>
-      <p className="mt-2 text-sm text-sand-200/45">{hint}</p>
-    </div>
-  );
-}
-function StatCard({ label, value, delta, icon: Icon, tone = "#d6b45f" }: { label: string; value: string; delta?: string; icon: any; tone?: string }) {
-  return (
-    <Card className="card-lift p-5">
-      <div className="flex items-center justify-between">
-        <p className="font-mono text-[9.5px] uppercase tracking-[0.2em] text-sand-200/45">{label}</p>
-        <span className="grid h-9 w-9 place-items-center rounded-lg" style={{ background: `${tone}14`, color: tone }}><Icon size={17} /></span>
-      </div>
-      <p className="display-num mt-3 text-3xl font-semibold text-sand-100">{value}</p>
-      {delta && <p className="mt-1 flex items-center gap-1.5 font-mono text-[9.5px] uppercase tracking-[0.12em]" style={{ color: tone }}><TrendingUp size={11} /> {delta}</p>}
-    </Card>
-  );
-}
-function SwitchRow({ on, onChange, label, desc, disabled }: { on: boolean; onChange: (b: boolean) => void; label: string; desc: string; disabled?: boolean }) {
-  return (
-    <button role="switch" aria-checked={on} disabled={disabled} onClick={() => onChange(!on)}
-      className={`flex w-full items-center justify-between gap-4 rounded-xl border p-4 text-left transition-all ${disabled ? "cursor-not-allowed opacity-50" : ""} ${on ? "border-kapha-500/50 bg-kapha-500/8" : "border-forest-700 bg-forest-950/40 hover:border-forest-600"}`}>
-      <span>
-        <span className={`block text-[14px] font-semibold ${on ? "text-sand-100" : "text-sand-200/70"}`}>{label}</span>
-        <span className="mt-0.5 block text-xs text-sand-200/45">{desc}</span>
-      </span>
-      <span className={`relative h-7 w-12 shrink-0 rounded-full transition-colors duration-300 ${on ? "bg-kapha-500" : "bg-forest-700"}`}>
-        <span className={`absolute top-1 h-5 w-5 rounded-full bg-sand-100 shadow transition-all duration-300 ${on ? "left-6" : "left-1"}`} />
-      </span>
-    </button>
-  );
-}
-
-/* ================================== shell =================================== */
+/* ---------------------------------- shell ----------------------------------- */
 
 export function AdminConsole() {
-  const { orders, products, allArticles, herbs, saveProduct, updateOrderStatus, cancelAndRestock, toast, logActivity, navigate, storeEnabled, setStoreEnabled } = useApp();
-  const [member, setMember] = useState<StudioUser | null>(() => auth.session());
+  const { toast, navigate } = useApp();
+  const [session] = useState<StudioUser | null>(() => auth.session());
   const [page, setPage] = useState<Page>("home");
   const [collapsed, setCollapsed] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const [mode, setModeState] = useState<"demo" | "live">(getMode);
-  const [fb, setFb] = useState<FBConfig>(loadFB);
-  const [query, setQuery] = useState("");
+  const [mobileNav, setMobileNav] = useState(false);
+  const [search, setSearch] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
   const [bellOpen, setBellOpen] = useState(false);
+  const [avatarOpen, setAvatarOpen] = useState(false);
+  const [tick, setTick] = useState(0);
+  const refresh = useCallback(() => setTick((t) => t + 1), []);
 
-  const role: CRole = member?.consoleRole ?? "viewer";
-  const can = (p: Page) => {
-    if (role === "superadmin") return true;
-    if (role === "editor") return ["home", "orders", "products", "content", "analytics"].includes(p);
-    return ["home", "analytics"].includes(p);
-  };
-
+  /* seed demo analytics + a welcome notification + starter discount once */
   useEffect(() => {
-    if (!member) return;
-    if (!can(page)) setPage("home");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [member, page]);
+    try {
+      seedDemoAnalytics();
+      listNotificationsF().then((n) => {
+        if (n.length === 0) pushNotificationF({ title: "Welcome to the Admin Console", body: "Everything here edits the live site — changes save instantly.", icon: "system" });
+      });
+      loadDiscountsF().then((d) => {
+        if (d.length === 0) saveDiscountF({ id: "d-welcome", code: "WELCOME10", type: "percent", value: 10, minOrder: 499, expires: "", active: true, createdAt: new Date().toISOString().slice(0, 10) });
+      });
+    } catch { /* never block the console on seeding */ }
+  }, []);
 
-  if (!member || !member.consoleAccess) {
-    return <ConsoleGate member={member} onLogin={setMember} onBack={() => navigate({ name: "home" })} />;
+  const me = session ? auth.get(session.id) ?? session : null;
+  const isSuper = me?.role === "superadmin";
+  const role: CRole = isSuper ? "superadmin" : me?.consoleRole ?? "viewer";
+  const canOpen = !!me && (isSuper || me.consoleAccess);
+
+  /* route protection — a role can never sit on a page it may not open */
+  useEffect(() => {
+    if (!PAGE_ACCESS[page].includes(role)) setPage("home");
+  }, [page, role]);
+
+  /* global search across every collection */
+  const idx = useAsync(() => loadSearchIndex(), [tick]);
+  const needle = search.trim().toLowerCase();
+  const results = useMemo(() => {
+    if (needle.length < 2 || !idx.rows) return [];
+    const d = idx.rows;
+    const match = (s: string) => s.toLowerCase().includes(needle);
+    const out: { page: Page; kind: string; label: string; sub: string; id: string }[] = [];
+    d.orders.forEach((o) => { if (match(o.id) || match(o.sub)) out.push({ page: "orders", kind: "Order", label: o.name, sub: o.sub, id: o.id }); });
+    d.products.forEach((p) => { if (match(p.name) || match(p.sub)) out.push({ page: "products", kind: "Product", label: p.name, sub: p.sub, id: p.id }); });
+    d.customers.forEach((c) => { if (match(c.name) || match(c.sub)) out.push({ page: "customers", kind: "Customer", label: c.name, sub: c.sub, id: c.id }); });
+    d.posts.forEach((p) => { if (match(p.name) || match(p.sub)) out.push({ page: "content", kind: "Post", label: p.name, sub: p.sub, id: p.id }); });
+    return out.slice(0, 8);
+  }, [needle, idx.rows]);
+
+  /* notifications */
+  const notifs = useAsync(() => listNotificationsF(), [tick, bellOpen]);
+  const unread = (notifs.rows ?? []).filter((n) => !n.read).length;
+
+  const mode = hasFirebaseConfig() && getConsoleMode() === "live" ? "Live" : "Demo";
+  const visiblePages = PAGES.filter((p) => PAGE_ACCESS[p.key].includes(role));
+
+  /* ------------------------- locked screen (no password) --------------------- */
+  if (!me || !canOpen) {
+    return (
+      <div className="ops-grid relative flex min-h-screen items-center justify-center bg-forest-950 px-5">
+        <div aria-hidden className="pointer-events-none absolute inset-0" style={{ background: "radial-gradient(50% 40% at 50% 18%, rgba(214,180,95,0.10), transparent 70%)" }} />
+        <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}
+          className="relative w-full max-w-md rounded-3xl border border-forest-700 bg-forest-900/85 p-9 text-center backdrop-blur">
+          <span className="animate-breathe mx-auto grid h-16 w-16 place-items-center rounded-2xl border border-gold-500/50 bg-gold-400/10 text-gold-300"><Lock size={26} /></span>
+          <p className="mt-5 font-mono text-[10px] uppercase tracking-[0.3em] text-gold-400">Admin Console</p>
+          <h1 className="mt-2 font-display text-3xl font-semibold text-sand-100">
+            {me ? "This account has no console access" : "Sign in to the Studio first"}
+          </h1>
+          <p className="mt-3 text-[13.5px] leading-relaxed text-sand-200/55">
+            {me
+              ? "A superadmin can switch your dashboard access on from Studio → Members → Permissions. Until then, this door stays closed."
+              : "The console sits behind the Doctor Studio login. Sign in there with your desk account — no separate password needed."}
+          </p>
+          <button onClick={() => navigate({ name: "studio" })}
+            className="mt-7 inline-flex items-center gap-2 rounded-full bg-gold-400 px-8 py-3.5 font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-forest-950 transition-all hover:bg-gold-300 hover:shadow-[0_0_28px_rgba(214,180,95,0.35)]">
+            <ShieldCheck size={15} /> Go to Studio sign-in
+          </button>
+        </motion.div>
+      </div>
+    );
   }
 
-  const allNav: { key: Page; label: string; icon: any }[] = [
-    { key: "home", label: "Home", icon: LayoutDashboard },
-    { key: "orders", label: "Orders", icon: ShoppingBag },
-    { key: "products", label: "Products", icon: Package },
-    { key: "customers", label: "Customers", icon: Users },
-    { key: "staff", label: "Staff & Access", icon: ShieldCheck },
-    { key: "content", label: "Content", icon: FileText },
-    { key: "marketing", label: "Marketing", icon: Tags },
-    { key: "analytics", label: "Analytics", icon: BarChart3 },
-    { key: "settings", label: "Settings", icon: SettingsIcon },
-  ];
-  const nav = allNav.filter((n) => can(n.key));
-
-  const notifications = [
-    { id: 1, text: `${orders.filter((o) => o.status === "new").length} new order${orders.filter((o) => o.status === "new").length === 1 ? "" : "s"} waiting`, tone: "#d6b45f" },
-    { id: 2, text: `${products.filter((p) => p.stock < 5).length} product${products.filter((p) => p.stock < 5).length === 1 ? "" : "s"} low on stock`, tone: "#e07f49" },
-    { id: 3, text: `${allArticles.filter((a) => a.status === "review").length} article${allArticles.filter((a) => a.status === "review").length === 1 ? "" : "s"} in review`, tone: "#93b1cf" },
-  ];
-
-  const searchResults = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return [];
-    const res: { type: string; label: string; go: Page }[] = [];
-    orders.filter((o) => o.id.toLowerCase().includes(q) || o.customer.name.toLowerCase().includes(q)).slice(0, 4).forEach((o) => res.push({ type: "Order", label: `${o.id} — ${o.customer.name}`, go: "orders" }));
-    products.filter((p) => p.name.toLowerCase().includes(q)).slice(0, 4).forEach((p) => res.push({ type: "Product", label: p.name, go: "products" }));
-    allArticles.filter((a) => a.title.toLowerCase().includes(q)).slice(0, 4).forEach((a) => res.push({ type: "Post", label: a.title, go: "content" }));
-    return res.slice(0, 8);
-  }, [query, orders, products, allArticles]);
-
-  const sidebar = (
-    <div className={`flex h-full flex-col ${collapsed ? "w-[72px]" : "w-64"} transition-all duration-300`}>
-      <div className="flex items-center gap-3 border-b border-forest-800 px-4 py-5">
-        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border-2 border-gold-500/60 bg-gold-400/10 text-gold-300"><ShieldCheck size={19} /></span>
-        {!collapsed && (
-          <div className="min-w-0">
-            <p className="font-display text-lg font-semibold leading-none text-sand-100">Vaidyagan</p>
-            <p className="mt-1 font-mono text-[8px] uppercase tracking-[0.24em] text-gold-400/80">Admin Console</p>
-          </div>
-        )}
-      </div>
-      <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
-        {nav.map((n) => (
-          <button key={n.key} onClick={() => { setPage(n.key); setMobileOpen(false); }} title={n.label}
-            className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 font-mono text-[10.5px] uppercase tracking-[0.12em] transition-all ${page === n.key ? "bg-gold-400/12 text-gold-300" : "text-sand-200/55 hover:bg-forest-850 hover:text-sand-100"} ${collapsed ? "justify-center" : ""}`}>
-            <n.icon size={17} className="shrink-0" />
-            {!collapsed && n.label}
-          </button>
-        ))}
-      </nav>
-      <div className="border-t border-forest-800 p-3">
-        <button onClick={() => setCollapsed(!collapsed)} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          className="hidden w-full items-center justify-center gap-2 rounded-xl border border-forest-700 py-2.5 font-mono text-[9.5px] uppercase tracking-[0.14em] text-sand-200/50 hover:border-gold-400 hover:text-gold-300 lg:flex">
-          {collapsed ? <ChevronRight size={14} /> : <><ChevronLeft size={14} /> Collapse</>}
-        </button>
-      </div>
-    </div>
-  );
+  /* --------------------------------- chrome ---------------------------------- */
 
   return (
-    <div className="flex min-h-screen bg-forest-950">
-      {/* desktop sidebar */}
-      <aside className="sticky top-0 hidden h-screen border-r border-forest-800 bg-forest-900/60 lg:block">{sidebar}</aside>
-      {/* mobile sidebar */}
+    <div className="relative flex min-h-screen bg-forest-950">
+      <div aria-hidden className="ops-grid pointer-events-none fixed inset-0 opacity-50" />
+
+      {/* sidebar — collapses to an icon rail */}
+      <aside className={`relative z-30 hidden shrink-0 flex-col border-r border-forest-800 bg-forest-900/70 backdrop-blur transition-all duration-300 lg:flex ${collapsed ? "w-[76px]" : "w-[240px]"}`}>
+        <div className={`flex items-center gap-3 border-b border-forest-800 px-4 py-5 ${collapsed ? "justify-center px-2" : ""}`}>
+          <img src={BRAND_LOGO_URL} alt="Vaidyagan" className="h-10 w-10 shrink-0 rounded-xl border border-gold-500/60 object-cover" />
+          {!collapsed && (
+            <div className="min-w-0">
+              <p className="truncate font-display text-lg font-semibold leading-none text-sand-100">Vaidyagan</p>
+              <p className="mt-1 font-mono text-[8.5px] uppercase tracking-[0.22em] text-gold-400/80">Admin Console</p>
+            </div>
+          )}
+        </div>
+        <nav className="flex-1 space-y-1 overflow-y-auto p-3">
+          {visiblePages.map(({ key, label, Icon }) => (
+            <button key={key} onClick={() => setPage(key)} title={label} aria-current={page === key ? "page" : undefined}
+              className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-3 text-left font-mono text-[10.5px] uppercase tracking-[0.14em] transition-all ${collapsed ? "justify-center px-0" : ""} ${
+                page === key ? "bg-gold-400/12 text-gold-300 shadow-[inset_0_0_0_1px_rgba(214,180,95,0.35)]" : "text-sand-200/55 hover:bg-forest-850 hover:text-sand-100"
+              }`}>
+              <Icon size={17} />
+              {!collapsed && <span className="truncate">{label}</span>}
+            </button>
+          ))}
+        </nav>
+        <div className="border-t border-forest-800 p-3">
+          <button onClick={() => setCollapsed(!collapsed)} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-forest-800 py-2.5 font-mono text-[9px] uppercase tracking-[0.16em] text-sand-200/45 transition-colors hover:border-gold-500/40 hover:text-gold-300">
+            <ChevronLeft size={13} className={`transition-transform duration-300 ${collapsed ? "rotate-180" : ""}`} />
+            {!collapsed && "Collapse"}
+          </button>
+        </div>
+      </aside>
+
+      {/* mobile drawer */}
       <AnimatePresence>
-        {mobileOpen && (
-          <motion.aside initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }} transition={{ type: "spring", damping: 30, stiffness: 300 }} className="fixed inset-y-0 left-0 z-[60] border-r border-forest-800 bg-forest-900 lg:hidden">{sidebar}</motion.aside>
+        {mobileNav && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-40 bg-forest-950/80 backdrop-blur-sm lg:hidden" onClick={() => setMobileNav(false)}>
+            <motion.aside initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }} transition={{ type: "spring", damping: 32, stiffness: 300 }}
+              onClick={(e) => e.stopPropagation()} className="flex h-full w-[260px] flex-col border-r border-forest-800 bg-forest-900 p-4" aria-label="Console navigation">
+              <div className="flex items-center gap-3 border-b border-forest-800 pb-4">
+                <img src={BRAND_LOGO_URL} alt="Vaidyagan" className="h-10 w-10 rounded-xl border border-gold-500/60 object-cover" />
+                <div><p className="font-display text-lg font-semibold leading-none text-sand-100">Vaidyagan</p><p className="mt-1 font-mono text-[8.5px] uppercase tracking-[0.2em] text-gold-400/80">Admin Console</p></div>
+              </div>
+              <nav className="mt-4 flex-1 space-y-1 overflow-y-auto">
+                {visiblePages.map(({ key, label, Icon }) => (
+                  <button key={key} onClick={() => { setPage(key); setMobileNav(false); }}
+                    className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-3 font-mono text-[10.5px] uppercase tracking-[0.14em] ${page === key ? "bg-gold-400/12 text-gold-300" : "text-sand-200/55"}`}>
+                    <Icon size={17} /> {label}
+                  </button>
+                ))}
+              </nav>
+            </motion.aside>
+          </motion.div>
         )}
       </AnimatePresence>
-      {mobileOpen && <div className="fixed inset-0 z-[55] bg-forest-950/70 backdrop-blur-sm lg:hidden" onClick={() => setMobileOpen(false)} />}
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      {/* main column */}
+      <div className="relative z-10 flex min-w-0 flex-1 flex-col">
         {/* header */}
-        <header className="sticky top-0 z-40 border-b border-forest-800 bg-forest-950/90 backdrop-blur-md">
-          <div className="flex items-center gap-3 px-5 py-3.5 lg:px-8">
-            <button onClick={() => setMobileOpen(true)} aria-label="Open menu" className="grid h-9 w-9 place-items-center rounded-full border border-forest-700 text-sand-200/70 lg:hidden"><ChevronRight size={16} className="rotate-180" /></button>
-            <span className={`flex items-center gap-2 rounded-full border px-3.5 py-1.5 font-mono text-[9px] uppercase tracking-[0.16em] ${mode === "live" ? "border-kapha-500/50 bg-kapha-500/10 text-kapha-300" : "border-gold-500/50 bg-gold-400/10 text-gold-300"}`}>
-              <span className={`h-1.5 w-1.5 rounded-full ${mode === "live" ? "bg-kapha-400" : "animate-blink bg-gold-400"}`} />
-              {mode === "live" ? "Live · Firestore" : "Demo · local"}
+        <header className="sticky top-0 z-30 border-b border-forest-800 bg-forest-950/85 backdrop-blur">
+          <div className="flex items-center gap-3 px-4 py-3.5 lg:px-7">
+            <button onClick={() => setMobileNav(true)} aria-label="Open navigation" className="grid h-10 w-10 place-items-center rounded-full border border-forest-700 text-sand-200/70 lg:hidden"><Menu size={17} /></button>
+            <div className="min-w-0">
+              <h1 className="truncate font-display text-xl font-semibold leading-none text-sand-100">{PAGES.find((p) => p.key === page)?.label}</h1>
+              <p className="mt-1 hidden font-mono text-[8.5px] uppercase tracking-[0.2em] text-sand-200/40 sm:block">Signed in as {me.name} · {role}</p>
+            </div>
+            <span className={`ml-1 flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 font-mono text-[8.5px] uppercase tracking-[0.16em] ${mode === "Live" ? "border-kapha-500/60 bg-kapha-500/12 text-kapha-300" : "border-gold-500/50 bg-gold-400/10 text-gold-300"}`} title="Which database this console edits">
+              <span className={`h-1.5 w-1.5 rounded-full ${mode === "Live" ? "bg-kapha-400" : "animate-blink bg-gold-400"}`} /> {mode}
             </span>
 
-            <div className="relative ml-auto hidden w-72 md:block">
-              <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sand-200/40" />
-              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search orders, products, posts…" aria-label="Global search"
-                className="w-full rounded-full border border-forest-700 bg-forest-900/80 py-2.5 pl-10 pr-4 text-sm text-sand-100 placeholder:text-sand-200/35 focus:border-gold-400 focus:outline-none" />
-              {query && searchResults.length > 0 && (
-                <div className="absolute inset-x-0 top-full z-30 mt-2 overflow-hidden rounded-xl border border-forest-700 bg-forest-900 shadow-[0_20px_50px_rgba(0,0,0,0.5)]">
-                  {searchResults.map((r, i) => (
-                    <button key={i} onClick={() => { setPage(r.go); setQuery(""); }} className="flex w-full items-center gap-3 border-b border-forest-800 px-4 py-3 text-left last:border-0 hover:bg-forest-850">
-                      <span className="rounded-full border border-forest-700 px-2 py-0.5 font-mono text-[8px] uppercase tracking-[0.1em] text-gold-300">{r.type}</span>
-                      <span className="truncate text-[13px] text-sand-200/80">{r.label}</span>
+            {/* global search */}
+            <div className="relative ml-auto hidden w-full max-w-xs md:block">
+              <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gold-400" />
+              <input value={search} onChange={(e) => { setSearch(e.target.value); setSearchOpen(true); }} onFocus={() => setSearchOpen(true)}
+                onBlur={() => window.setTimeout(() => setSearchOpen(false), 150)}
+                placeholder="Search orders, products, customers…" className={`${cInp} pl-10`} aria-label="Global search" />
+              {searchOpen && needle.length >= 2 && (
+                <div className="absolute inset-x-0 top-full z-40 mt-2 overflow-hidden rounded-xl border border-forest-700 bg-forest-900 shadow-[0_24px_60px_rgba(0,0,0,0.55)]">
+                  {results.length === 0 && <p className="px-4 py-3 text-[12.5px] text-sand-200/50">Nothing matches "{search}".</p>}
+                  {results.map((r) => (
+                    <button key={`${r.kind}-${r.id}`} onMouseDown={(e) => { e.preventDefault(); setPage(r.page); setSearch(""); setSearchOpen(false); }}
+                      className="flex w-full items-center gap-3 border-b border-forest-800 px-4 py-3 text-left last:border-0 hover:bg-forest-850">
+                      <span className="rounded-full border border-forest-700 px-2 py-0.5 font-mono text-[8px] uppercase tracking-[0.12em] text-gold-300">{r.kind}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[13px] font-semibold text-sand-100">{r.label}</span>
+                        <span className="block truncate font-mono text-[9px] uppercase tracking-[0.12em] text-sand-200/40">{r.sub}</span>
+                      </span>
                     </button>
                   ))}
                 </div>
               )}
             </div>
 
+            {/* bell */}
             <div className="relative">
-              <button onClick={() => setBellOpen(!bellOpen)} aria-label="Notifications" className="relative grid h-9 w-9 place-items-center rounded-full border border-forest-700 text-sand-200/70 hover:border-gold-400 hover:text-gold-300">
-                <Bell size={16} />
-                <span className="absolute -right-0.5 -top-0.5 grid h-4 w-4 place-items-center rounded-full bg-ember-400 font-mono text-[8px] font-bold text-forest-950">{notifications.length}</span>
+              <button onClick={() => { setBellOpen(!bellOpen); setAvatarOpen(false); }} aria-label={`Notifications${unread ? ` (${unread} unread)` : ""}`}
+                className="relative grid h-10 w-10 place-items-center rounded-full border border-forest-700 text-sand-200/70 transition-colors hover:border-gold-400 hover:text-gold-300">
+                <Bell size={17} />
+                {unread > 0 && <span className="absolute -right-0.5 -top-0.5 grid h-5 min-w-[18px] place-items-center rounded-full bg-ember-400 px-1 font-mono text-[9px] font-bold text-forest-950">{unread}</span>}
               </button>
               <AnimatePresence>
                 {bellOpen && (
-                  <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }} className="absolute right-0 top-full z-30 mt-2 w-72 overflow-hidden rounded-xl border border-forest-700 bg-forest-900 shadow-[0_20px_50px_rgba(0,0,0,0.5)]">
-                    <div className="border-b border-forest-800 px-4 py-3 font-mono text-[9px] uppercase tracking-[0.16em] text-gold-400">Needs attention</div>
-                    {notifications.map((n) => (
-                      <div key={n.id} className="flex items-center gap-3 border-b border-forest-800 px-4 py-3 last:border-0">
-                        <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: n.tone }} />
-                        <span className="text-[12.5px] text-sand-200/75">{n.text}</span>
-                      </div>
-                    ))}
+                  <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }}
+                    className="absolute right-0 top-full z-40 mt-2 w-[320px] overflow-hidden rounded-xl border border-forest-700 bg-forest-900 shadow-[0_24px_60px_rgba(0,0,0,0.55)]">
+                    <div className="flex items-center justify-between border-b border-forest-800 px-4 py-3">
+                      <p className="font-mono text-[9.5px] uppercase tracking-[0.2em] text-gold-400">Notifications</p>
+                      <button onClick={() => markAllReadF().then(refresh)} className="font-mono text-[8.5px] uppercase tracking-[0.14em] text-sand-200/45 hover:text-gold-300">Mark all read</button>
+                    </div>
+                    <div className="max-h-[320px] overflow-y-auto">
+                      {(notifs.rows ?? []).length === 0 && <p className="px-4 py-6 text-center text-[12.5px] text-sand-200/45">All quiet.</p>}
+                      {(notifs.rows ?? []).slice(0, 12).map((n) => (
+                        <div key={n.id} className={`border-b border-forest-800 px-4 py-3 last:border-0 ${n.read ? "opacity-55" : ""}`}>
+                          <p className="flex items-center gap-2 text-[12.5px] font-semibold text-sand-100">{!n.read && <span className="h-1.5 w-1.5 rounded-full bg-gold-400" />}{n.title}</p>
+                          <p className="mt-0.5 text-[11.5px] leading-relaxed text-sand-200/55">{n.body}</p>
+                          <p className="mt-1 font-mono text-[8px] uppercase tracking-[0.14em] text-sand-200/35">{timeAgo(n.at)}</p>
+                        </div>
+                      ))}
+                    </div>
                   </motion.div>
                 )}
               </AnimatePresence>
             </div>
 
-            <div className="flex items-center gap-2.5">
-              <Monogram author={{ initials: member.name.split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase(), hue: member.hue }} size={34} />
-              <div className="hidden sm:block">
-                <p className="text-[12.5px] font-semibold leading-none text-sand-100">{member.name}</p>
-                <p className="mt-0.5 font-mono text-[8px] uppercase tracking-[0.16em] text-gold-400/80">{role}</p>
-              </div>
-              <button onClick={() => { auth.logout(); setMember(null); navigate({ name: "home" }); }} aria-label="Sign out" className="grid h-9 w-9 place-items-center rounded-full border border-forest-700 text-sand-200/70 hover:border-ember-400 hover:text-ember-300"><LogOut size={15} /></button>
+            {/* avatar */}
+            <div className="relative">
+              <button onClick={() => { setAvatarOpen(!avatarOpen); setBellOpen(false); }} aria-label="Account menu"
+                className="grid h-10 w-10 place-items-center rounded-full border border-gold-500/50 bg-gold-400/10 font-display text-sm font-semibold text-gold-300 transition-all hover:bg-gold-400/20">
+                {me.name.split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase()}
+              </button>
+              <AnimatePresence>
+                {avatarOpen && (
+                  <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }}
+                    className="absolute right-0 top-full z-40 mt-2 w-[220px] overflow-hidden rounded-xl border border-forest-700 bg-forest-900 shadow-[0_24px_60px_rgba(0,0,0,0.55)]">
+                    <div className="border-b border-forest-800 px-4 py-3">
+                      <p className="truncate text-[13px] font-semibold text-sand-100">{me.name}</p>
+                      <p className="font-mono text-[8.5px] uppercase tracking-[0.14em] text-gold-400/80">{role} · {mode} mode</p>
+                    </div>
+                    <button onClick={() => navigate({ name: "studio" })} className="flex w-full items-center gap-2.5 px-4 py-3 text-left text-[12.5px] text-sand-200/70 hover:bg-forest-850 hover:text-gold-300"><FileText size={14} /> Open Doctor Studio</button>
+                    <button onClick={() => navigate({ name: "home" })} className="flex w-full items-center gap-2.5 px-4 py-3 text-left text-[12.5px] text-sand-200/70 hover:bg-forest-850 hover:text-gold-300"><ExternalLink size={14} /> View website</button>
+                    <button onClick={() => { auth.logout(); window.location.reload(); }} className="flex w-full items-center gap-2.5 border-t border-forest-800 px-4 py-3 text-left text-[12.5px] text-ember-300 hover:bg-ember-500/10"><LogOut size={14} /> Sign out</button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </div>
         </header>
 
-        <main className="flex-1 px-5 py-8 lg:px-8">
-          {page === "home" && <HomePage role={role} mode={mode} goTo={setPage} />}
-          {page === "orders" && can("orders") && <OrdersPage role={role} />}
-          {page === "products" && can("products") && <ProductsPage role={role} />}
-          {page === "customers" && can("customers") && <CustomersPage />}
-          {page === "staff" && can("staff") && <StaffPage />}
-          {page === "content" && can("content") && <ContentPage role={role} />}
-          {page === "marketing" && can("marketing") && <MarketingPage />}
-          {page === "analytics" && can("analytics") && <AnalyticsPage />}
-          {page === "settings" && can("settings") && <SettingsPage mode={mode} setMode={(m) => { setMode(m); setModeState(m); }} fb={fb} setFb={setFb} />}
+        {/* page */}
+        <main className="flex-1 px-4 py-7 lg:px-7">
+          <motion.div key={page} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+            {page === "home" && <HomePage role={role} refresh={refresh} goTo={setPage} />}
+            {page === "orders" && <OrdersPage role={role} refresh={refresh} />}
+            {page === "products" && <ProductsPage role={role} refresh={refresh} />}
+            {page === "customers" && <CustomersPage role={role} refresh={refresh} />}
+            {page === "staff" && role === "superadmin" && <StaffPage role={role} refresh={refresh} />}
+            {page === "content" && <ContentPage role={role} refresh={refresh} />}
+            {page === "marketing" && <MarketingPage role={role} refresh={refresh} />}
+            {page === "analytics" && <AnalyticsPage />}
+            {page === "settings" && role === "superadmin" && <SettingsPage role={role} refresh={refresh} />}
+          </motion.div>
         </main>
       </div>
     </div>
   );
 }
 
-/* -------------------------------- console gate ------------------------------ */
-
-function ConsoleGate({ member, onLogin, onBack }: { member: StudioUser | null; onLogin: (u: StudioUser) => void; onBack: () => void }) {
-  const { toast } = useApp();
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const u = auth.login(username, password);
-    if (!u) { setError("Incorrect username or password."); return; }
-    if (!u.consoleAccess) { setError("This account doesn't have Admin Console access. Ask a superadmin to grant it."); return; }
-    toast(`Welcome, ${u.name}`);
-    onLogin(u);
-  };
-
-  return (
-    <div className="ops-grid flex min-h-screen items-center justify-center bg-forest-950 px-5">
-      <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-md">
-        <div className="rounded-2xl border border-forest-700 bg-forest-900/90 p-8 shadow-[0_30px_90px_rgba(0,0,0,0.5)] backdrop-blur">
-          <div className="flex items-center gap-3">
-            <span className="grid h-12 w-12 place-items-center rounded-2xl border-2 border-gold-500/60 bg-gold-400/10 text-gold-300"><ShieldCheck size={21} /></span>
-            <div>
-              <p className="font-display text-2xl font-semibold text-sand-100">Admin Console</p>
-              <p className="font-mono text-[9px] uppercase tracking-[0.22em] text-gold-400/80">Superadmin access required</p>
-            </div>
-          </div>
-          <form onSubmit={submit} className="mt-6 space-y-3.5">
-            <input value={username} onChange={(e) => { setUsername(e.target.value); setError(""); }} placeholder="Username" className="w-full rounded-xl border border-forest-700 bg-forest-950/70 px-4 py-3 text-[15px] text-sand-100 placeholder:text-sand-200/25 focus:border-gold-400 focus:outline-none" />
-            <input type="password" value={password} onChange={(e) => { setPassword(e.target.value); setError(""); }} placeholder="Password" className="w-full rounded-xl border border-forest-700 bg-forest-950/70 px-4 py-3 text-[15px] text-sand-100 placeholder:text-sand-200/25 focus:border-gold-400 focus:outline-none" />
-            {error && <p className="rounded-lg border border-ember-500/40 bg-ember-500/10 px-4 py-2.5 text-[12.5px] text-ember-300">{error}</p>}
-            <button type="submit" className="gold-sheen w-full rounded-xl bg-gold-400 py-3.5 font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-forest-950 hover:bg-gold-300">Enter console</button>
-          </form>
-          <button onClick={onBack} className="mt-4 w-full text-center font-mono text-[9.5px] uppercase tracking-[0.16em] text-sand-200/40 hover:text-gold-300">← Back to the website</button>
-          <p className="mt-4 text-center font-mono text-[9px] uppercase tracking-[0.14em] text-sand-200/30">Demo — monesh / admin91466</p>
-        </div>
-      </motion.div>
-    </div>
-  );
-}
-
 /* ---------------------------------- home ------------------------------------ */
 
-function HomePage({ role, mode, goTo }: { role: CRole; mode: "demo" | "live"; goTo: (p: Page) => void }) {
-  const { orders, products, allArticles, activity } = useApp();
-  const revenue = orders.filter((o) => o.status !== "cancelled").reduce((s, o) => s + o.total, 0);
-  const low = products.filter((p) => p.stock < 5).length;
-  const newOrders = orders.filter((o) => o.status === "new").length;
+function HomePage({ role, refresh, goTo }: { role: CRole; refresh: () => void; goTo: (p: Page) => void }) {
+  const orders = useAsync(() => loadOrders(), [refresh]);
+  const products = useAsync(() => loadProducts(), [refresh]);
+  const activity = useAsync<ActivityRecord[]>(() => loadActivity(), [refresh]);
 
-  const attention = [
-    { label: `${newOrders} new order${newOrders === 1 ? "" : "s"} to pack`, go: "orders" as Page, show: newOrders > 0, tone: "#d6b45f" },
-    { label: `${low} product${low === 1 ? "" : "s"} low on stock`, go: "products" as Page, show: low > 0, tone: "#e07f49" },
-    { label: `${allArticles.filter((a) => a.status === "review").length} article(s) pending review`, go: "content" as Page, show: allArticles.filter((a) => a.status === "review").length > 0, tone: "#93b1cf" },
-  ].filter((a) => a.show && (role === "superadmin" || a.go !== "content" || role === "editor"));
+  const today = new Date().toISOString().slice(0, 10);
+  const month = today.slice(0, 7);
+  const os = orders.rows ?? [];
+  const ps = products.rows ?? [];
+  const revToday = os.filter((o) => o.status !== "cancelled" && o.placedAt.slice(0, 10) === today).reduce((s, o) => s + o.total, 0);
+  const revMonth = os.filter((o) => o.status !== "cancelled" && o.placedAt.slice(0, 7) === month).reduce((s, o) => s + o.total, 0);
+  const newOrders = os.filter((o) => o.status === "new").length;
+  const lowStock = ps.filter((p) => p.stock < 5).length;
+  const newCustomers = 0; // populated via the Customers page's async source
+
+  const attention: { label: string; page: Page; tone: "ember" | "gold" | "moss" }[] = [
+    ...(newOrders > 0 ? [{ label: `${newOrders} new order${newOrders > 1 ? "s" : ""} to pack`, page: "orders" as Page, tone: "ember" as const }] : []),
+    ...(lowStock > 0 ? [{ label: `${lowStock} product${lowStock > 1 ? "s" : ""} low on stock`, page: "products" as Page, tone: "ember" as const }] : []),
+  ];
+
+  if (orders.loading || products.loading) return <ListSkeleton rows={6} />;
+  if (orders.error) return <ErrorState onRetry={orders.reload} />;
 
   return (
-    <div>
-      <PageHead title="Good day, doctor." sub={`Here's what's happening across Vaidyagan — running in ${mode === "live" ? "Live (Firestore)" : "Demo"} mode.`} />
-      <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Revenue (all time)" value={`₹${revenue.toLocaleString("en-IN")}`} delta="across all orders" icon={TrendingUp} />
-        <StatCard label="Orders" value={String(orders.length)} delta={`${newOrders} new`} icon={ShoppingBag} tone="#93b1cf" />
-        <StatCard label="Low-stock products" value={String(low)} delta="need restocking" icon={AlertTriangle} tone="#e07f49" />
-        <StatCard label="Published essays" value={String(allArticles.filter((a) => a.status === "published").length)} delta="on the journal" icon={FileText} tone="#82b39e" />
+    <div className="space-y-7">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard label="Revenue today" value={inr(revToday)} sub={`${inr(revMonth)} this month`} icon={<Star size={16} />} delay={0} />
+        <StatCard label="Orders" value={String(os.length)} sub={`${newOrders} new to pack`} icon={<ShoppingCart size={16} />} delay={0.06} />
+        <StatCard label="Low stock" value={String(lowStock)} sub="below 5 units" tone={lowStock > 0 ? "ember" : "moss"} icon={<Package size={16} />} delay={0.12} />
+        <StatCard label="Products live" value={String(ps.filter((p) => p.visible !== false).length)} sub={`${ps.length} total in catalogue`} tone="moss" icon={<Database size={16} />} delay={0.18} />
       </div>
 
-      <div className="mt-8 grid gap-6 lg:grid-cols-[1fr_1.4fr]">
-        <Card className="p-6">
-          <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-gold-400">Needs attention</p>
+      <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
+        <div className="rounded-2xl border border-forest-800 bg-forest-900/70 p-6">
+          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-gold-400">Needs attention</p>
           <div className="mt-4 space-y-2.5">
-            {attention.length === 0 && <p className="rounded-lg border border-dashed border-forest-700 p-6 text-center text-sm text-sand-200/45">All clear — nothing waiting.</p>}
+            {attention.length === 0 && (
+              <p className="flex items-center gap-2.5 rounded-xl border border-kapha-500/40 bg-kapha-500/8 px-4 py-3.5 text-[13px] text-kapha-300"><Check size={15} /> All clear — nothing waiting on you.</p>
+            )}
             {attention.map((a) => (
-              <button key={a.label} onClick={() => goTo(a.go)} className="flex w-full items-center gap-3 rounded-xl border border-forest-800 bg-forest-850/50 px-4 py-3 text-left transition-all hover:border-gold-500/50">
-                <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: a.tone }} />
-                <span className="flex-1 text-[13px] text-sand-200/80">{a.label}</span>
-                <ChevronRight size={15} className="text-sand-200/30" />
+              <button key={a.label} onClick={() => goTo(a.page)}
+                className={`flex w-full items-center justify-between gap-3 rounded-xl border px-4 py-3.5 text-left transition-all hover:-translate-y-0.5 ${
+                  a.tone === "ember" ? "border-ember-500/40 bg-ember-500/6 text-ember-300" : a.tone === "gold" ? "border-gold-500/40 bg-gold-400/6 text-gold-300" : "border-moss-500/40 bg-moss-500/6 text-moss-300"
+                }`}>
+                <span className="text-[13px] font-semibold">{a.label}</span>
+                <ChevronLeft size={14} className="rotate-180" />
               </button>
             ))}
           </div>
-        </Card>
-        <Card className="p-6">
-          <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-gold-400">Recent activity</p>
+        </div>
+
+        <div className="rounded-2xl border border-forest-800 bg-forest-900/70 p-6">
+          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-gold-400">Recent activity</p>
           <div className="mt-4 space-y-2.5">
-            {activity.length === 0 && <p className="rounded-lg border border-dashed border-forest-700 p-6 text-center text-sm text-sand-200/45">Actions you take will appear here.</p>}
-            {activity.slice(0, 8).map((a) => (
-              <div key={a.id} className="flex items-start gap-3 rounded-lg border border-forest-800 bg-forest-850/40 px-4 py-2.5">
-                <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-gold-400" />
+            {activity.loading && <ListSkeleton rows={4} />}
+            {!activity.loading && (activity.rows ?? []).length === 0 && <p className="text-[13px] text-sand-200/45">Actions on the desk and in the console land here.</p>}
+            {(activity.rows ?? []).slice(0, 10).map((a) => (
+              <div key={a.id} className="flex items-start gap-3 rounded-xl border border-forest-800 bg-forest-850/50 px-4 py-3">
+                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-gold-400" />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-[12.5px] text-sand-200/80">{a.action}</p>
-                  <p className="font-mono text-[8.5px] uppercase tracking-[0.12em] text-sand-200/35">{a.actor} · {new Date(a.at).toLocaleString()}</p>
+                  <p className="text-[12.5px] leading-relaxed text-sand-200/80"><b className="text-sand-100">{a.actor}</b> {a.action}</p>
+                  <p className="mt-0.5 font-mono text-[8px] uppercase tracking-[0.14em] text-sand-200/35">{timeAgo(a.at)}</p>
                 </div>
               </div>
             ))}
           </div>
-        </Card>
+        </div>
       </div>
+      <span className="hidden">{newCustomers}</span>
     </div>
   );
 }
 
 /* ---------------------------------- orders ---------------------------------- */
 
-function OrdersPage({ role }: { role: CRole }) {
-  const { orders, updateOrderStatus, cancelAndRestock, toast, logActivity } = useApp();
+function OrdersPage({ role, refresh }: { role: CRole; refresh: () => void }) {
+  const { toast, logActivity } = useApp();
+  const q = useAsync(() => loadOrders(), [refresh]);
   const [status, setStatus] = useState<"all" | OrderStatus>("all");
+  const [needle, setNeedle] = useState("");
+  const [sort, setSort] = useState<"newest" | "oldest" | "value">("newest");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [openId, setOpenId] = useState<string | null>(null);
   const canEdit = role !== "viewer";
 
-  const filtered = orders.filter((o) => status === "all" || o.status === status);
+  const orders = q.rows ?? [];
+  const list = useMemo(() => {
+    const n = needle.trim().toLowerCase();
+    let out = orders.filter((o) => (status === "all" || o.status === status) &&
+      (!n || o.id.toLowerCase().includes(n) || o.customer.name.toLowerCase().includes(n) || (o.customer.phone ?? "").includes(n)));
+    out = [...out].sort((a, b) => sort === "newest" ? b.placedAt.localeCompare(a.placedAt) : sort === "oldest" ? a.placedAt.localeCompare(b.placedAt) : b.total - a.total);
+    return out;
+  }, [orders, status, needle, sort]);
+
   const open = orders.find((o) => o.id === openId) ?? null;
-  const counts = (s: OrderStatus) => orders.filter((o) => o.status === s).length;
 
   const advance = (o: Order) => {
-    const idx = ORDER_FLOW.indexOf(o.status as any);
-    if (idx < 0 || idx >= ORDER_FLOW.length - 1) return;
-    const next = ORDER_FLOW[idx + 1];
-    updateOrderStatus(o.id, next);
-    logActivity("store", `moved order ${o.id} to ${ORDER_META[next].label}`, o.id);
-    toast(`${o.id} → ${ORDER_META[next].label}`);
+    const next = ORDER_FLOW[ORDER_FLOW.indexOf(o.status) + 1];
+    if (!next) return;
+    saveOrderF(o.id, { status: next }).then(() => {
+      logActivity("store", `moved order ${o.id} to ${ORDER_META[next].label}`, o.id);
+      pushNotificationF({ title: `Order ${o.id} → ${ORDER_META[next].label}`, body: `${o.customer.name}'s order moved forward.`, icon: "order" });
+      toast(`Order ${o.id} → ${ORDER_META[next].label}`);
+      q.reload(); refresh();
+    });
+  };
+
+  const bulkShip = () => {
+    const targets = orders.filter((o) => selected.has(o.id) && (o.status === "new" || o.status === "processing"));
+    Promise.all(targets.map((o) => saveOrderF(o.id, { status: "shipped" as OrderStatus }))).then(() => {
+      logActivity("store", `marked ${targets.length} orders as shipped`);
+      toast(`${targets.length} order${targets.length === 1 ? "" : "s"} marked shipped`);
+      setSelected(new Set()); q.reload(); refresh();
+    });
+  };
+
+  const toggleSel = (id: string) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+
+  const printInvoice = (o: Order) => {
+    try {
+      const w = window.open("", "_blank");
+      if (!w) { toast("Pop-up blocked — allow pop-ups to print"); return; }
+      w.document.write(`<html><head><title>Invoice ${o.id}</title><style>body{font-family:Georgia,serif;color:#22271f;padding:40px;max-width:720px;margin:0 auto}h1{margin:0}small{color:#777;font-family:monospace}table{width:100%;border-collapse:collapse;margin-top:18px}th,td{border-bottom:1px solid #e2ddcf;padding:9px 8px;text-align:left;font-size:14px}th{font-family:monospace;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#a37e2a}.amt{text-align:right}.tot td{font-weight:bold;border:none}</style></head><body>
+      <div style="display:flex;gap:14px;align-items:center;border-bottom:3px solid #c49c3e;padding-bottom:14px"><img src="${BRAND_LOGO_URL}" style="width:52px;height:52px;border-radius:12px;object-fit:cover"/><div><h1>Vaidyagan</h1><small>Clinically verified Ayurveda</small></div><div style="margin-left:auto;text-align:right"><small>TAX INVOICE</small><br><b>${o.id}</b><br><small>${formatDate(o.placedAt)}</small></div></div>
+      <p style="margin-top:18px"><small>BILL TO</small><br><b>${o.customer.name}</b><br>${o.customer.address}, ${o.customer.city} — ${o.customer.pin}<br>${o.customer.phone ?? ""}</p>
+      <table><tr><th>Item</th><th>Qty</th><th class="amt">Amount</th></tr>${o.items.map((i) => `<tr><td>${i.name}</td><td>${i.qty}</td><td class="amt">${inr(i.price * i.qty)}</td></tr>`).join("")}
+      <tr class="tot"><td colspan="2">Total</td><td class="amt">${inr(o.total)}</td></tr></table>
+      <p style="margin-top:28px;font-size:11px;color:#888">Thank you for trusting classical Ayurveda. Computer-generated invoice — no signature required.</p></body></html>`);
+      w.document.close(); w.focus(); w.print();
+    } catch { toast("Pop-up blocked — allow pop-ups to print"); }
   };
 
   return (
-    <div>
-      <PageHead title="Orders" sub="Track, advance and fulfil customer orders." />
-      <div className="mb-5 flex flex-wrap gap-2">
-        <button onClick={() => setStatus("all")} className={`rounded-full border px-4 py-1.5 font-mono text-[9.5px] uppercase tracking-[0.12em] ${status === "all" ? "border-gold-400 bg-gold-400/12 text-gold-300" : "border-forest-700 text-sand-200/55"}`}>All · {orders.length}</button>
-        {ORDER_FLOW.concat(["cancelled"] as OrderStatus[]).map((s) => (
-          <button key={s} onClick={() => setStatus(s)} className={`rounded-full border px-4 py-1.5 font-mono text-[9.5px] uppercase tracking-[0.12em] ${status === s ? "border-gold-400 bg-gold-400/12 text-gold-300" : "border-forest-700 text-sand-200/55"}`}>{ORDER_META[s].label} · {counts(s)}</button>
-        ))}
+    <div className="space-y-5">
+      <div className="no-scrollbar flex gap-2 overflow-x-auto pb-1">
+        {(["all", ...ORDER_FLOW, "cancelled"] as ("all" | OrderStatus)[]).map((s) => {
+          const n = s === "all" ? orders.length : orders.filter((o) => o.status === s).length;
+          return (
+            <button key={s} onClick={() => setStatus(s)}
+              className={`flex shrink-0 items-center gap-2 rounded-full border px-4 py-2 font-mono text-[9.5px] uppercase tracking-[0.14em] transition-all ${status === s ? "border-gold-400 bg-gold-400/12 text-gold-300" : "border-forest-700 text-sand-200/55 hover:text-sand-100"}`}>
+              {s !== "all" && <span className="h-1.5 w-1.5 rounded-full" style={{ background: ORDER_META[s as OrderStatus].color }} />}
+              {s === "all" ? "All" : ORDER_META[s as OrderStatus].label} · {n}
+            </button>
+          );
+        })}
       </div>
 
-      {filtered.length === 0 ? <EmptyState icon={ShoppingBag} title="No orders here" hint="Orders placed at checkout appear in this list." /> : (
-        <Card>
-          <div className="hidden grid-cols-[100px_1.4fr_1fr_100px_120px_110px] gap-3 border-b border-forest-800 px-5 py-3 font-mono text-[8.5px] uppercase tracking-[0.16em] text-sand-200/40 md:grid">
-            <span>Order</span><span>Customer</span><span>Items</span><span>Status</span><span>Total</span><span />
-          </div>
-          {filtered.map((o) => (
-            <div key={o.id} className="grid grid-cols-2 items-center gap-3 border-b border-forest-800 px-5 py-4 transition-colors last:border-0 hover:bg-forest-850/50 md:grid-cols-[100px_1.4fr_1fr_100px_120px_110px]">
-              <span className="font-mono text-[12px] font-semibold text-gold-300">{o.id}</span>
-              <span className="truncate text-[13px] font-semibold text-sand-100">{o.customer.name}<span className="block font-mono text-[8.5px] uppercase tracking-[0.1em] text-sand-200/35">{formatDate(o.placedAt)}</span></span>
-              <span className="hidden truncate text-[12px] text-sand-200/60 md:block">{o.items.map((i) => i.name).join(", ")}</span>
-              <span className={`inline-flex w-fit rounded-full border px-2.5 py-1 font-mono text-[8px] uppercase tracking-[0.1em] ${ORDER_META[o.status].cls}`}>{ORDER_META[o.status].label}</span>
-              <span className="font-display text-[15px] font-semibold text-sand-100">₹{o.total.toLocaleString("en-IN")}</span>
-              <span className="flex justify-end gap-1.5">
-                {canEdit && o.status !== "delivered" && o.status !== "cancelled" && (
-                  <button onClick={() => advance(o)} title="Advance status" className="grid h-8 w-8 place-items-center rounded-lg border border-forest-700 text-sand-200/60 hover:border-kapha-400 hover:text-kapha-300"><Truck size={14} /></button>
-                )}
-                <button onClick={() => setOpenId(o.id)} title="Open order" className="grid h-8 w-8 place-items-center rounded-lg border border-forest-700 text-sand-200/60 hover:border-gold-400 hover:text-gold-300"><Eye size={14} /></button>
-              </span>
-            </div>
-          ))}
-        </Card>
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative min-w-[220px] flex-1">
+          <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gold-400" />
+          <input value={needle} onChange={(e) => setNeedle(e.target.value)} placeholder="Search order id, customer, phone…" className={`${cInp} pl-10`} aria-label="Search orders" />
+        </div>
+        <select value={sort} onChange={(e) => setSort(e.target.value as "newest" | "oldest" | "value")} className={`${cInp} w-auto`} aria-label="Sort orders">
+          <option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="value">Highest value</option>
+        </select>
+        {canEdit && selected.size > 0 && (
+          <button onClick={bulkShip} className="flex items-center gap-2 rounded-full bg-kapha-500 px-5 py-2.5 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-forest-950 hover:brightness-110">
+            <Send size={13} /> Mark {selected.size} shipped
+          </button>
+        )}
+      </div>
+
+      {q.loading && <ListSkeleton rows={6} />}
+      {q.error && <ErrorState onRetry={q.reload} />}
+      {!q.loading && !q.error && list.length === 0 && (
+        <EmptyState icon={<ShoppingCart size={22} />} title="No orders here"
+          body={needle || status !== "all" ? "Nothing matches this filter — try clearing it." : "New orders appear the moment a shopper checks out."}
+          actionLabel={needle || status !== "all" ? "Clear filters" : undefined}
+          onAction={() => { setNeedle(""); setStatus("all"); }} />
       )}
 
-      <AnimatePresence>
+      {!q.loading && !q.error && list.length > 0 && (
+        <div className="overflow-hidden rounded-2xl border border-forest-800">
+          <div className="hidden grid-cols-[40px_1fr_1.2fr_0.7fr_0.8fr_1fr_110px] items-center gap-3 border-b border-forest-800 bg-forest-900/80 px-5 py-3 font-mono text-[9px] uppercase tracking-[0.16em] text-sand-200/45 md:grid">
+            <span /><span>Order</span><span>Customer</span><span>Items</span><span>Total</span><span>Status</span><span />
+          </div>
+          {list.map((o) => (
+            <div key={o.id} className="grid grid-cols-2 items-center gap-3 border-b border-forest-800 bg-forest-900/50 px-5 py-3.5 transition-colors last:border-0 hover:bg-forest-850 md:grid-cols-[40px_1fr_1.2fr_0.7fr_0.8fr_1fr_110px]">
+              {canEdit ? (
+                <button onClick={() => toggleSel(o.id)} aria-label={`Select ${o.id}`}
+                  className={`hidden h-5 w-5 place-items-center rounded-md border transition-all md:grid ${selected.has(o.id) ? "border-gold-400 bg-gold-400 text-forest-950" : "border-forest-600"}`}>
+                  {selected.has(o.id) && <Check size={12} />}
+                </button>
+              ) : <span />}
+              <button onClick={() => setOpenId(o.id)} className="text-left">
+                <p className="font-mono text-[12px] font-semibold text-gold-300">{o.id}</p>
+                <p className="font-mono text-[9px] uppercase tracking-[0.12em] text-sand-200/40">{formatDate(o.placedAt)}</p>
+              </button>
+              <div className="min-w-0">
+                <p className="truncate text-[13px] font-semibold text-sand-100">{o.customer.name}</p>
+                <p className="truncate text-[11px] text-sand-200/45">{o.customer.city} · {o.customer.phone ?? "—"}</p>
+              </div>
+              <p className="text-[12.5px] text-sand-200/70">{o.items.reduce((s, i) => s + i.qty, 0)}</p>
+              <p className="font-mono text-[12.5px] font-semibold text-sand-100">{inr(o.total)}</p>
+              <span className="w-fit"><StatusBadge status={o.status} /></span>
+              <button onClick={() => setOpenId(o.id)} className="col-span-2 w-fit rounded-full border border-forest-700 px-4 py-2 font-mono text-[9px] uppercase tracking-[0.14em] text-sand-200/65 hover:border-gold-400 hover:text-gold-300 md:col-span-1">
+                Open
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* order drawer */}
+      <Drawer open={!!open} onClose={() => setOpenId(null)} title={open?.id ?? ""} subtitle={`Placed ${open ? formatDate(open.placedAt) : ""} · ${open?.paymentMethod ?? "—"}`}>
         {open && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[65] flex items-end justify-center bg-forest-950/80 backdrop-blur-sm sm:items-center sm:p-6" onClick={() => setOpenId(null)}>
-            <motion.div initial={{ y: 60, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 40, opacity: 0 }} onClick={(e) => e.stopPropagation()} className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-2xl border border-forest-700 bg-forest-900 p-6 sm:rounded-2xl sm:p-7" role="dialog" aria-label={`Order ${open.id}`}>
-              <div className="flex items-center justify-between">
-                <p className="font-display text-2xl font-semibold text-sand-100">{open.id}</p>
-                <button onClick={() => setOpenId(null)} aria-label="Close" className="grid h-9 w-9 place-items-center rounded-full border border-forest-700 text-sand-200 hover:text-gold-300"><X size={15} /></button>
-              </div>
-              <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-sand-200/45">{formatDate(open.placedAt)} · {open.paymentMethod ?? "—"}</p>
-              <div className="mt-4 rounded-xl border border-forest-800 bg-forest-850/50 p-4">
-                <p className="font-mono text-[9px] uppercase tracking-[0.16em] text-gold-400">Ship to</p>
-                <p className="mt-1.5 text-[13.5px] font-semibold text-sand-100">{open.customer.name}</p>
-                <p className="text-[12.5px] text-sand-200/65">{open.customer.address}, {open.customer.city} — {open.customer.pin}</p>
-                <p className="text-[12.5px] text-sand-200/65">{open.customer.phone}</p>
-              </div>
-              <div className="mt-4 space-y-2">
-                {open.items.map((i, idx) => (
-                  <div key={idx} className="flex items-center gap-3 rounded-lg border border-forest-800 bg-forest-850/40 px-3.5 py-2.5">
-                    {i.image ? <SmartImg src={i.image} alt={i.name} className="h-11 w-11 rounded-lg object-cover duotone" /> : <span className="grid h-11 w-11 place-items-center rounded-lg border border-forest-800 bg-forest-850 font-display text-gold-500/40">वै</span>}
-                    <span className="min-w-0 flex-1 truncate text-[13px] text-sand-200/80">{i.name} <span className="text-sand-200/40">× {i.qty}</span></span>
-                    <span className="font-mono text-[12px] text-sand-100">₹{(i.price * i.qty).toLocaleString("en-IN")}</span>
+          <div className="space-y-5">
+            {open.status === "cancelled" ? (
+              <p className="rounded-xl border border-ember-500/40 bg-ember-500/8 px-4 py-3 text-[12.5px] text-ember-300">Cancelled — stock was returned to the shelf.</p>
+            ) : (
+              <ol className="flex items-start" aria-label="Order progress">
+                {ORDER_FLOW.map((s, i) => {
+                  const idx = ORDER_FLOW.indexOf(open.status);
+                  const done = i <= idx;
+                  return (
+                    <li key={s} className="relative flex-1 text-center">
+                      <span className={`mx-auto grid h-7 w-7 place-items-center rounded-full border-2 ${done ? "border-kapha-500 bg-kapha-500/20 text-kapha-300" : "border-forest-700 text-sand-200/30"}`}>
+                        {done ? <Check size={12} /> : <span className="font-mono text-[9px]">{i + 1}</span>}
+                      </span>
+                      {i < ORDER_FLOW.length - 1 && <span className={`absolute left-[calc(50%+16px)] top-3.5 h-0.5 w-[calc(100%-32px)] ${i < idx ? "bg-kapha-500" : "bg-forest-700"}`} />}
+                      <p className={`mt-1.5 font-mono text-[7px] uppercase leading-tight tracking-[0.08em] ${done ? "text-kapha-300" : "text-sand-200/35"}`}>{ORDER_META[s].label}</p>
+                    </li>
+                  );
+                })}
+              </ol>
+            )}
+
+            <div className="rounded-xl border border-forest-800 bg-forest-850/60 p-4">
+              <p className="font-mono text-[8.5px] uppercase tracking-[0.2em] text-gold-400/80">Ship to</p>
+              <p className="mt-1.5 text-sm font-semibold text-sand-100">{open.customer.name}</p>
+              <p className="mt-1 text-[12.5px] leading-relaxed text-sand-200/65">{open.customer.address}, {open.customer.city} — {open.customer.pin}</p>
+              <p className="mt-1 font-mono text-[11px] text-sand-200/50">{open.customer.phone ?? "no phone"}</p>
+            </div>
+
+            <div className="space-y-2.5">
+              {open.items.map((i, x) => (
+                <div key={x} className="flex items-center gap-3 rounded-xl border border-forest-800 bg-forest-850/50 p-3">
+                  {i.image ? <SmartImg src={i.image} alt={i.name} className="h-12 w-12 rounded-lg border border-forest-800 object-cover duotone" /> : <span className="grid h-12 w-12 place-items-center rounded-lg border border-forest-800 bg-forest-850 font-display text-gold-500/40">वै</span>}
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[13px] font-semibold text-sand-100">{i.name}</p>
+                    <p className="font-mono text-[9.5px] text-sand-200/45">{inr(i.price)} × {i.qty}</p>
                   </div>
-                ))}
-              </div>
-              <div className="mt-4 flex justify-end">
-                <p className="font-display text-xl font-semibold text-gold-300">Total ₹{open.total.toLocaleString("en-IN")}</p>
-              </div>
-              {role !== "viewer" && (open.status === "new" || open.status === "processing" || open.status === "shipped" || open.status === "out") && (
-                <div className="mt-5 flex gap-2.5">
-                  <button onClick={() => { advance(open); }} className="gold-sheen flex flex-1 items-center justify-center gap-2 rounded-full bg-kapha-500 py-3 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-forest-950 hover:brightness-110"><Truck size={14} /> Advance status</button>
-                  <button onClick={() => { cancelAndRestock(open.id); logActivity("store", `cancelled order ${open.id} & restocked`, open.id); toast(`Order ${open.id} cancelled — stock returned`); setOpenId(null); }} className="flex flex-1 items-center justify-center gap-2 rounded-full border border-ember-500/50 py-3 font-mono text-[10px] uppercase tracking-[0.14em] text-ember-300 hover:bg-ember-500/10"><X size={14} /> Cancel & restock</button>
+                  <span className="font-mono text-[12px] text-sand-100">{inr(i.price * i.qty)}</span>
                 </div>
-              )}
-            </motion.div>
-          </motion.div>
+              ))}
+              <div className="flex items-center justify-between rounded-xl border border-gold-500/35 bg-gold-400/6 px-4 py-3">
+                <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-gold-400">Total</span>
+                <span className="font-display text-xl font-semibold text-gold-300">{inr(open.total)}</span>
+              </div>
+            </div>
+
+            {canEdit && open.status !== "cancelled" && open.status !== "delivered" && (
+              <div className="space-y-2.5">
+                {ORDER_FLOW.indexOf(open.status) < ORDER_FLOW.length - 1 && (
+                  <button onClick={() => advance(open)}
+                    className="flex w-full items-center justify-center gap-2 rounded-full bg-kapha-500 py-3 font-mono text-[10.5px] font-semibold uppercase tracking-[0.16em] text-forest-950 hover:brightness-110">
+                    <Send size={14} /> Mark as {ORDER_META[ORDER_FLOW[ORDER_FLOW.indexOf(open.status) + 1]].label}
+                  </button>
+                )}
+                <ConfirmChip label="Cancel & restock" armedLabel="Cancel this order?" timeout={4000}
+                  onConfirm={() => cancelOrderRestockF(open.id).then(() => { logActivity("store", `cancelled order ${open.id} & restocked`, open.id); toast(`Order ${open.id} cancelled — stock returned`); setOpenId(null); q.reload(); refresh(); })} />
+              </div>
+            )}
+            <button onClick={() => printInvoice(open)} className="flex w-full items-center justify-center gap-2 rounded-full border border-gold-500/50 py-3 font-mono text-[10.5px] uppercase tracking-[0.16em] text-gold-300 hover:bg-gold-400 hover:text-forest-950">
+              <Printer size={14} /> Print invoice
+            </button>
+          </div>
         )}
-      </AnimatePresence>
+      </Drawer>
     </div>
   );
 }
 
 /* --------------------------------- products --------------------------------- */
 
-function ProductsPage({ role }: { role: CRole }) {
-  const { products, saveProduct, deleteProduct, toast, logActivity } = useApp();
-  const [view, setView] = useState<"cards" | "table">("cards");
-  const [editing, setEditing] = useState<Product | null>(null);
-  const [cat, setCat] = useState("All");
-  const [q, setQ] = useState("");
+const PRODUCT_CATS = ["All", "Oils", "Churnas", "Capsules", "Ghritas", "Kadhas"] as const;
+
+function ProductsPage({ role, refresh }: { role: CRole; refresh: () => void }) {
+  const { toast, logActivity } = useApp();
+  const q = useAsync(() => loadProducts(), [refresh]);
   const canEdit = role !== "viewer";
+  const [view, setView] = useState<"cards" | "table">("cards");
+  const [cat, setCat] = useState<(typeof PRODUCT_CATS)[number]>("All");
+  const [needle, setNeedle] = useState("");
+  const [editing, setEditing] = useState<Product | "new" | null>(null);
 
-  const filtered = products.filter((p) => (cat === "All" || p.category === cat) && (!q || p.name.toLowerCase().includes(q.toLowerCase())));
+  const products = q.rows ?? [];
+  const list = products.filter((p) => (cat === "All" || p.category === cat) && (!needle.trim() || p.name.toLowerCase().includes(needle.trim().toLowerCase())));
 
-  const quickStock = (p: Product, stock: number) => {
-    const next = Math.max(0, stock);
-    saveProduct({ ...p, stock: next });
-    if (next < 5) toast(`${p.name} is low on stock (${next})`);
+  const quickStock = (p: Product, d: number) => {
+    const stock = Math.max(0, p.stock + d);
+    saveProductF({ ...p, stock }).then(() => {
+      if (stock < 5) pushNotificationF({ title: `Low stock — ${p.name}`, body: `Only ${stock} unit${stock === 1 ? "" : "s"} left.`, icon: "stock" });
+      q.reload();
+    });
+  };
+
+  const exportCsv = () => {
+    const { toCsv, downloadFile } = csvHelpers();
+    const csv = toCsv(
+      ["Name", "Sanskrit", "Category", "Price", "MRP", "Stock", "Visible"],
+      list.map((p) => [p.name, p.sanskrit, p.category, p.price, p.mrp, p.stock, p.visible === false ? "hidden" : "visible"])
+    );
+    downloadFile("vaidyagan-products.csv", csv, "text/csv");
+    toast("Product list downloaded as CSV");
   };
 
   return (
-    <div>
-      <PageHead title="Products & Inventory" sub="Manage the formulation store, stock levels and visibility.">
-        {canEdit && <button onClick={() => setEditing({ id: `prod-${Date.now()}`, name: "", sanskrit: "", price: 0, mrp: 0, image: "", category: "Oils", stock: 10, rating: 4.5, dosage: "", ingredients: [], desc: "" })} className="gold-sheen flex items-center gap-2 rounded-full bg-gold-400 px-6 py-3 font-mono text-[10.5px] font-semibold uppercase tracking-[0.16em] text-forest-950 hover:bg-gold-300"><Plus size={15} /> Add New Product</button>}
-      </PageHead>
-
-      <div className="mb-5 flex flex-wrap items-center gap-2">
-        <div className="relative min-w-[200px] flex-1 md:max-w-xs">
-          <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sand-200/40" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search products…" className="w-full rounded-full border border-forest-700 bg-forest-900/80 py-2.5 pl-10 pr-4 text-sm text-sand-100 placeholder:text-sand-200/35 focus:border-gold-400 focus:outline-none" />
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative min-w-[200px] flex-1">
+          <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gold-400" />
+          <input value={needle} onChange={(e) => setNeedle(e.target.value)} placeholder="Search products…" className={`${cInp} pl-10`} aria-label="Search products" />
         </div>
-        {["All", "Oils", "Churnas", "Capsules", "Ghritas", "Kadhas"].map((c) => (
-          <button key={c} onClick={() => setCat(c)} className={`rounded-full border px-4 py-1.5 font-mono text-[9.5px] uppercase tracking-[0.12em] ${cat === c ? "border-gold-400 bg-gold-400/12 text-gold-300" : "border-forest-700 text-sand-200/55"}`}>{c}</button>
-        ))}
-        <div className="ml-auto flex rounded-full border border-forest-700 p-1">
-          <button onClick={() => setView("cards")} aria-label="Card view" className={`rounded-full px-3 py-1.5 ${view === "cards" ? "bg-gold-400/15 text-gold-300" : "text-sand-200/50"}`}><Package size={14} /></button>
-          <button onClick={() => setView("table")} aria-label="Table view" className={`rounded-full px-3 py-1.5 ${view === "table" ? "bg-gold-400/15 text-gold-300" : "text-sand-200/50"}`}><LayoutDashboard size={14} /></button>
+        <div className="no-scrollbar flex gap-2 overflow-x-auto">
+          {PRODUCT_CATS.map((c) => (
+            <button key={c} onClick={() => setCat(c)}
+              className={`shrink-0 rounded-full border px-3.5 py-2 font-mono text-[9px] uppercase tracking-[0.12em] transition-all ${cat === c ? "border-gold-400 bg-gold-400/12 text-gold-300" : "border-forest-700 text-sand-200/55 hover:text-sand-100"}`}>{c}</button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="flex overflow-hidden rounded-full border border-forest-700">
+            {(["cards", "table"] as const).map((v) => (
+              <button key={v} onClick={() => setView(v)} aria-pressed={view === v} aria-label={`${v} view`}
+                className={`px-3.5 py-2 font-mono text-[9px] uppercase tracking-[0.12em] transition-all ${view === v ? "bg-gold-400/15 text-gold-300" : "text-sand-200/50 hover:text-sand-100"}`}>{v}</button>
+            ))}
+          </div>
+          <button onClick={exportCsv} className="flex items-center gap-2 rounded-full border border-forest-700 px-4 py-2 font-mono text-[9px] uppercase tracking-[0.12em] text-sand-200/60 hover:border-gold-400 hover:text-gold-300"><Download size={13} /> CSV</button>
+          {canEdit && (
+            <button onClick={() => setEditing("new")} className="flex items-center gap-2 rounded-full bg-gold-400 px-5 py-2.5 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-forest-950 hover:bg-gold-300"><Plus size={13} /> Add product</button>
+          )}
         </div>
       </div>
 
-      {filtered.length === 0 ? <EmptyState icon={Package} title="No products match" hint="Adjust the search or add a new product." /> : view === "cards" ? (
-        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {filtered.map((p) => (
-            <Card key={p.id} className={`card-lift overflow-hidden ${p.stock <= 0 ? "opacity-60" : ""}`}>
-              <SmartImg src={p.image} alt={p.name} className="aspect-[16/10] w-full object-cover duotone" style={p.duotone ? { filter: p.duotone } : undefined} />
-              <div className="p-5">
-                <div className="flex items-start justify-between gap-2">
-                  <p className="font-display text-[16px] font-semibold leading-snug text-sand-100">{p.name}</p>
-                  {p.stock < 5 && <span className={`shrink-0 rounded-full border px-2 py-0.5 font-mono text-[8px] uppercase tracking-[0.1em] ${p.stock <= 0 ? "border-forest-600 text-sand-200/50" : "border-ember-500/50 text-ember-300"}`}>{p.stock <= 0 ? "Out" : `Low · ${p.stock}`}</span>}
+      {q.loading && <ListSkeleton rows={6} />}
+      {q.error && <ErrorState onRetry={q.reload} />}
+      {!q.loading && !q.error && list.length === 0 && (
+        <EmptyState icon={<Package size={22} />} title="No products match"
+          body={needle || cat !== "All" ? "Nothing fits this search — try clearing it." : "Add your first formulation to open the store shelf."}
+          actionLabel={canEdit ? "Add product" : undefined} onAction={canEdit ? () => setEditing("new") : undefined} />
+      )}
+
+      {!q.loading && !q.error && view === "cards" && list.length > 0 && (
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {list.map((p) => (
+            <motion.div key={p.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
+              className={`group overflow-hidden rounded-2xl border bg-forest-900/70 transition-all hover:-translate-y-0.5 ${p.stock === 0 ? "border-forest-800 opacity-70" : p.stock < 5 ? "border-ember-500/45" : "border-forest-800 hover:border-gold-500/40"}`}>
+              <button onClick={() => canEdit && setEditing(p)} className="relative block h-36 w-full overflow-hidden" aria-label={`Edit ${p.name}`}>
+                <SmartImg src={p.image} alt={p.name} className="h-full w-full object-cover duotone transition-transform duration-500 group-hover:scale-105" style={p.duotone ? { filter: p.duotone } : undefined} />
+                <span className="absolute left-3 top-3 rounded-full border border-gold-500/50 bg-forest-950/75 px-2.5 py-1 font-mono text-[8px] uppercase tracking-[0.12em] text-gold-300 backdrop-blur">{p.category}</span>
+                {p.stock === 0 && <span className="absolute inset-0 grid place-items-center bg-forest-950/60 font-mono text-[10px] uppercase tracking-[0.2em] text-sand-200/70">Out of stock</span>}
+                {p.stock > 0 && p.stock < 5 && <span className="absolute right-3 top-3 rounded-full bg-ember-400 px-2.5 py-1 font-mono text-[8px] font-bold uppercase tracking-[0.1em] text-forest-950">{p.stock} left</span>}
+                {p.visible === false && <span className="absolute bottom-3 left-3 rounded-full border border-forest-600 bg-forest-950/80 px-2.5 py-1 font-mono text-[8px] uppercase tracking-[0.12em] text-sand-200/60">Hidden from store</span>}
+              </button>
+              <div className="p-4">
+                <p className="truncate text-[14px] font-semibold text-sand-100">{p.name}</p>
+                <p className="mt-0.5 font-mono text-[9px] uppercase tracking-[0.12em] text-sand-200/40">{p.sanskrit}</p>
+                <div className="mt-3 flex items-center justify-between">
+                  <p className="font-display text-lg font-semibold text-gold-300">{inr(p.price)} <span className="font-mono text-[10px] text-sand-200/35 line-through">{inr(p.mrp)}</span></p>
+                  {canEdit && (
+                    <div className="flex items-center gap-1.5" aria-label={`Stock for ${p.name}`}>
+                      <button onClick={() => quickStock(p, -1)} aria-label={`Decrease stock of ${p.name}`} className="grid h-7 w-7 place-items-center rounded-full border border-forest-700 text-sand-200/60 hover:border-gold-400 hover:text-gold-300"><Minus size={12} /></button>
+                      <span className={`w-8 text-center font-mono text-[12px] ${p.stock === 0 ? "text-sand-200/40" : p.stock < 5 ? "text-ember-300" : "text-sand-100"}`}>{p.stock}</span>
+                      <button onClick={() => quickStock(p, 1)} aria-label={`Increase stock of ${p.name}`} className="grid h-7 w-7 place-items-center rounded-full border border-forest-700 text-sand-200/60 hover:border-gold-400 hover:text-gold-300"><Plus size={12} /></button>
+                    </div>
+                  )}
                 </div>
-                <p className="mt-1 font-mono text-[10px] text-gold-300">₹{p.price} · {p.category}</p>
                 {canEdit && (
-                  <div className="mt-4 flex items-center gap-2">
-                    <button onClick={() => quickStock(p, p.stock - 1)} aria-label="Decrease stock" className="grid h-8 w-8 place-items-center rounded-lg border border-forest-700 text-sand-200/60 hover:border-gold-400 hover:text-gold-300">−</button>
-                    <span className="w-10 text-center font-mono text-[13px] text-sand-100">{p.stock}</span>
-                    <button onClick={() => quickStock(p, p.stock + 1)} aria-label="Increase stock" className="grid h-8 w-8 place-items-center rounded-lg border border-forest-700 text-sand-200/60 hover:border-gold-400 hover:text-gold-300">+</button>
-                    <span className="ml-1 font-mono text-[8.5px] uppercase tracking-[0.1em] text-sand-200/40">stock</span>
+                  <div className="mt-3.5 flex items-center gap-2">
+                    <button onClick={() => setEditing(p)} className="flex-1 rounded-full border border-forest-700 py-2 font-mono text-[9px] uppercase tracking-[0.12em] text-sand-200/65 hover:border-gold-400 hover:text-gold-300">Edit</button>
+                    <ConfirmChip onConfirm={() => deleteProductF(p.id).then(() => { toast(`${p.name} deleted`); logActivity("store", `deleted product ${p.name}`); q.reload(); refresh(); })} />
                   </div>
                 )}
-                <div className="mt-4 flex items-center justify-between">
-                  <SwitchRowMini on={p.visible !== false} onChange={(b) => { if (!canEdit) return; saveProduct({ ...p, visible: b }); toast(b ? `${p.name} visible in store` : `${p.name} hidden from store`); }} />
-                  {canEdit && <button onClick={() => setEditing(p)} className="flex items-center gap-1.5 rounded-full border border-forest-700 px-4 py-2 font-mono text-[9.5px] uppercase tracking-[0.12em] text-sand-200/60 hover:border-gold-400 hover:text-gold-300"><Pencil size={12} /> Edit</button>}
-                </div>
               </div>
-            </Card>
+            </motion.div>
           ))}
         </div>
-      ) : (
-        <Card>
-          <div className="hidden grid-cols-[1.4fr_100px_90px_90px_110px] gap-3 border-b border-forest-800 px-5 py-3 font-mono text-[8.5px] uppercase tracking-[0.16em] text-sand-200/40 md:grid"><span>Product</span><span>Price</span><span>Stock</span><span>Status</span><span /></div>
-          {filtered.map((p) => (
-            <div key={p.id} className="grid grid-cols-2 items-center gap-3 border-b border-forest-800 px-5 py-3.5 last:border-0 hover:bg-forest-850/50 md:grid-cols-[1.4fr_100px_90px_90px_110px]">
-              <span className="flex items-center gap-3"><SmartImg src={p.image} alt={p.name} className="h-10 w-10 rounded-lg object-cover duotone" /><span className="truncate text-[13px] font-semibold text-sand-100">{p.name}</span></span>
-              <span className="font-mono text-[12px] text-gold-300">₹{p.price}</span>
-              <span className={`font-mono text-[12px] ${p.stock < 5 ? "text-ember-300" : "text-sand-200/70"}`}>{p.stock}</span>
-              <span className={`font-mono text-[8.5px] uppercase tracking-[0.1em] ${p.visible !== false ? "text-kapha-300" : "text-sand-200/40"}`}>{p.visible !== false ? "Live" : "Hidden"}</span>
-              {canEdit && <button onClick={() => setEditing(p)} className="justify-self-end rounded-full border border-forest-700 px-4 py-1.5 font-mono text-[9px] uppercase tracking-[0.12em] text-sand-200/60 hover:border-gold-400 hover:text-gold-300">Edit</button>}
-            </div>
-          ))}
-        </Card>
       )}
 
-      <AnimatePresence>
-        {editing && <ProductEditor product={editing} onClose={() => setEditing(null)} onSave={(p) => { saveProduct(p); logActivity("store", `saved product "${p.name}"`, p.name); toast(`${p.name} saved`); setEditing(null); }} />}
-      </AnimatePresence>
+      {!q.loading && !q.error && view === "table" && list.length > 0 && (
+        <div className="overflow-hidden rounded-2xl border border-forest-800">
+          <div className="hidden grid-cols-[2fr_1fr_0.8fr_0.8fr_1fr_120px] items-center gap-3 border-b border-forest-800 bg-forest-900/80 px-5 py-3 font-mono text-[9px] uppercase tracking-[0.16em] text-sand-200/45 md:grid">
+            <span>Product</span><span>Category</span><span>Price</span><span>Stock</span><span>Visibility</span><span />
+          </div>
+          {list.map((p) => (
+            <div key={p.id} className="grid grid-cols-2 items-center gap-3 border-b border-forest-800 bg-forest-900/50 px-5 py-3 last:border-0 hover:bg-forest-850 md:grid-cols-[2fr_1fr_0.8fr_0.8fr_1fr_120px]">
+              <span className="flex items-center gap-3">
+                <SmartImg src={p.image} alt="" className="h-10 w-10 rounded-lg border border-forest-800 object-cover duotone" />
+                <span className="min-w-0"><span className="block truncate text-[13px] font-semibold text-sand-100">{p.name}</span><span className="block font-mono text-[8.5px] uppercase text-sand-200/40">{p.sanskrit}</span></span>
+              </span>
+              <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-sand-200/55">{p.category}</span>
+              <span className="font-mono text-[12.5px] text-sand-100">{inr(p.price)}</span>
+              <span className={`font-mono text-[12.5px] ${p.stock === 0 ? "text-sand-200/40" : p.stock < 5 ? "text-ember-300" : "text-sand-100"}`}>{p.stock}</span>
+              <span className="col-span-2 md:col-span-1">
+                {p.visible === false
+                  ? <span className="rounded-full border border-forest-700 px-2.5 py-1 font-mono text-[8.5px] uppercase tracking-[0.1em] text-sand-200/50">Hidden</span>
+                  : <span className="rounded-full border border-kapha-500/40 bg-kapha-500/10 px-2.5 py-1 font-mono text-[8.5px] uppercase tracking-[0.1em] text-kapha-300">Visible</span>}
+              </span>
+              {canEdit && <button onClick={() => setEditing(p)} className="col-span-2 w-fit rounded-full border border-forest-700 px-4 py-2 font-mono text-[9px] uppercase tracking-[0.12em] text-sand-200/65 hover:border-gold-400 hover:text-gold-300 md:col-span-1">Edit</button>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* editor */}
+      {editing && <ProductEditor product={editing === "new" ? null : editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); q.reload(); refresh(); }} />}
     </div>
   );
 }
 
-function SwitchRowMini({ on, onChange }: { on: boolean; onChange: (b: boolean) => void }) {
-  return (
-    <button role="switch" aria-checked={on} onClick={() => onChange(!on)} className={`relative h-6 w-11 rounded-full transition-colors duration-300 ${on ? "bg-kapha-500" : "bg-forest-700"}`}>
-      <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-sand-100 shadow transition-all duration-300 ${on ? "left-[22px]" : "left-0.5"}`} />
-    </button>
-  );
+function csvHelpers() {
+  const toCsv = (headers: string[], rows: (string | number)[][]) => {
+    const esc = (v: string | number) => { const s = String(v ?? ""); return /["\,\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+    return [headers.map(esc).join(","), ...rows.map((r) => r.map(esc).join(","))].join("\n");
+  };
+  const downloadFile = (name: string, content: string, mime = "text/plain") => {
+    try {
+      const blob = new Blob([content], { type: `${mime};charset=utf-8` });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 4000);
+    } catch { /* ignore */ }
+  };
+  return { toCsv, downloadFile };
 }
 
-function ProductEditor({ product, onClose, onSave }: { product: Product; onClose: () => void; onSave: (p: Product) => void }) {
-  const [p, setP] = useState<Product>(product);
-  const inp = "w-full rounded-lg border border-forest-700 bg-forest-950/60 px-3.5 py-2.5 text-sm text-sand-100 placeholder:text-sand-200/25 focus:border-gold-400 focus:outline-none";
-  const lbl = "mb-1.5 block font-mono text-[8.5px] uppercase tracking-[0.16em] text-sand-200/45";
-  const set = (patch: Partial<Product>) => setP((x) => ({ ...x, ...patch }));
+function ProductEditor({ product, onClose, onSaved }: { product: Product | null; onClose: () => void; onSaved: () => void }) {
+  const { toast, logActivity } = useApp();
+  const blank: Product = {
+    id: `p-${Date.now()}`, name: "", sanskrit: "", price: 0, mrp: 0, image: "", category: "Churnas",
+    stock: 10, rating: 4.5, dosage: "", ingredients: [], desc: "", highlights: [], source: "", directions: "", safety: "", visible: true,
+  };
+  const [f, setF] = useState<Product>(product ?? blank);
+  const [ingText, setIngText] = useState((product?.ingredients ?? []).join(", "));
+  const [hlText, setHlText] = useState((product?.highlights ?? []).join("\n"));
+  const [saving, setSaving] = useState(false);
+
+  const save = () => {
+    if (!f.name.trim()) { toast("Give the product a name"); return; }
+    setSaving(true);
+    const next: Product = {
+      ...f,
+      ingredients: ingText.split(",").map((s) => s.trim()).filter(Boolean),
+      highlights: hlText.split("\n").map((s) => s.trim()).filter(Boolean),
+      mrp: f.mrp || f.price,
+    };
+    saveProductF(next).then(() => {
+      setSaving(false);
+      toast(product ? `${next.name} updated` : `${next.name} added to the shelf`);
+      logActivity("store", `${product ? "updated" : "added"} product ${next.name}`);
+      onSaved();
+    });
+  };
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[65] flex items-end justify-center bg-forest-950/80 backdrop-blur-sm sm:items-center sm:p-6" onClick={onClose}>
-      <motion.div initial={{ y: 60, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 40, opacity: 0 }} onClick={(e) => e.stopPropagation()} className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-t-2xl border border-forest-700 bg-forest-900 p-6 sm:rounded-2xl sm:p-7" role="dialog" aria-label="Edit product">
-        <div className="flex items-center justify-between">
-          <p className="font-display text-2xl font-semibold text-sand-100">{product.name ? "Edit product" : "Add New Product"}</p>
-          <button onClick={onClose} aria-label="Close" className="grid h-9 w-9 place-items-center rounded-full border border-forest-700 text-sand-200 hover:text-gold-300"><X size={15} /></button>
-        </div>
-        <div className="mt-5 grid gap-4 sm:grid-cols-2">
-          <div className="sm:col-span-2"><label className={lbl}>Product name *</label><input value={p.name} onChange={(e) => set({ name: e.target.value })} placeholder="e.g. Triphala Churna" className={inp} /></div>
-          <div><label className={lbl}>Sanskrit</label><input value={p.sanskrit} onChange={(e) => set({ sanskrit: e.target.value })} placeholder="त्रिफला" className={inp} /></div>
-          <div><label className={lbl}>Category</label>
-            <select value={p.category} onChange={(e) => set({ category: e.target.value as Product["category"] })} className={inp}>
-              {["Oils", "Churnas", "Capsules", "Ghritas", "Kadhas"].map((c) => <option key={c} value={c}>{c}</option>)}
+    <Drawer open onClose={onClose} title={product ? "Edit product" : "New product"} subtitle={product ? product.name : "Add to the store shelf"} wide>
+      <div className="space-y-4">
+        <div className="grid gap-3.5 sm:grid-cols-2">
+          <div><label className={cLbl}>Name *</label><input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} className={cInp} /></div>
+          <div><label className={cLbl}>Sanskrit</label><input value={f.sanskrit} onChange={(e) => setF({ ...f, sanskrit: e.target.value })} className={cInp} /></div>
+          <div>
+            <label className={cLbl}>Category</label>
+            <select value={f.category} onChange={(e) => setF({ ...f, category: e.target.value as Product["category"] })} className={cInp}>
+              {(["Oils", "Churnas", "Capsules", "Ghritas", "Kadhas"] as const).map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
-          <div><label className={lbl}>Price (₹)</label><input type="number" value={p.price} onChange={(e) => set({ price: Number(e.target.value) })} className={inp} /></div>
-          <div><label className={lbl}>MRP (₹)</label><input type="number" value={p.mrp} onChange={(e) => set({ mrp: Number(e.target.value) })} className={inp} /></div>
-          <div><label className={lbl}>Quantity in stock</label><input type="number" value={p.stock} onChange={(e) => set({ stock: Number(e.target.value) })} className={inp} /></div>
-          <div><label className={lbl}>Badge</label><input value={p.badge ?? ""} onChange={(e) => set({ badge: e.target.value })} placeholder="e.g. Bestseller" className={inp} /></div>
-          <div className="sm:col-span-2"><label className={lbl}>Image URL (or leave blank)</label><input value={p.image} onChange={(e) => set({ image: e.target.value })} placeholder="https://…" className={inp} /></div>
-          <div className="sm:col-span-2"><label className={lbl}>Dosage</label><input value={p.dosage} onChange={(e) => set({ dosage: e.target.value })} placeholder="3–6 g at bedtime with warm water" className={inp} /></div>
-          <div className="sm:col-span-2"><label className={lbl}>Ingredients (comma separated)</label><input value={p.ingredients.join(", ")} onChange={(e) => set({ ingredients: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })} className={inp} /></div>
-          <div className="sm:col-span-2"><label className={lbl}>Description</label><textarea value={p.desc} onChange={(e) => set({ desc: e.target.value })} rows={3} className={inp} /></div>
+          <div className="grid grid-cols-3 gap-2.5">
+            <div><label className={cLbl}>Price ₹</label><input value={f.price || ""} onChange={(e) => setF({ ...f, price: parseInt(e.target.value.replace(/\D/g, "") || "0", 10) })} className={cInp} /></div>
+            <div><label className={cLbl}>MRP ₹</label><input value={f.mrp || ""} onChange={(e) => setF({ ...f, mrp: parseInt(e.target.value.replace(/\D/g, "") || "0", 10) })} className={cInp} /></div>
+            <div><label className={cLbl}>Stock</label><input value={f.stock} onChange={(e) => setF({ ...f, stock: parseInt(e.target.value.replace(/\D/g, "") || "0", 10) })} className={cInp} /></div>
+          </div>
         </div>
-        <div className="mt-4"><SwitchRowMini on={p.visible !== false} onChange={(b) => set({ visible: b })} /> <span className="ml-2 font-mono text-[9px] uppercase tracking-[0.12em] text-sand-200/50">{p.visible !== false ? "Shown in store" : "Hidden from store"}</span></div>
-        <div className="mt-6 flex gap-2.5">
-          <button onClick={() => onSave(p)} disabled={!p.name.trim()} className="gold-sheen flex-1 rounded-full bg-gold-400 py-3 font-mono text-[10.5px] font-semibold uppercase tracking-[0.16em] text-forest-950 hover:bg-gold-300 disabled:opacity-35">Save product</button>
+
+        <div>
+          <label className={cLbl}>Photo — upload or paste a URL</label>
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-forest-600 px-4 py-2.5 font-mono text-[9.5px] uppercase tracking-[0.14em] text-sand-200/60 hover:border-gold-400 hover:text-gold-300">
+              <Plus size={13} /> Upload image
+              <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) readImageFile(file, (u) => setF({ ...f, image: u }), (m) => toast(m));
+                e.target.value = "";
+              }} />
+            </label>
+            <input value={f.image.startsWith("") ? "(uploaded)" : f.image} onChange={(e) => setF({ ...f, image: e.target.value })} placeholder="https://…" className={`${cInp} max-w-[220px]`} />
+            {f.image && <SmartImg src={f.image} alt="Preview" className="h-12 w-16 rounded-lg border border-forest-700 object-cover" />}
+          </div>
+        </div>
+
+        <div><label className={cLbl}>Description</label><textarea value={f.desc} onChange={(e) => setF({ ...f, desc: e.target.value })} rows={3} className={cInp} /></div>
+        <div><label className={cLbl}>Highlights — one per line</label><textarea value={hlText} onChange={(e) => setHlText(e.target.value)} rows={3} className={cInp} placeholder={"Slow-infused over 21 days\n60+ classical herbs"} /></div>
+        <div className="grid gap-3.5 sm:grid-cols-2">
+          <div><label className={cLbl}>Ingredients — comma separated</label><textarea value={ingText} onChange={(e) => setIngText(e.target.value)} rows={3} className={cInp} /></div>
+          <div><label className={cLbl}>Classical source</label><input value={f.source ?? ""} onChange={(e) => setF({ ...f, source: e.target.value })} className={cInp} placeholder="Charaka Samhita…" /></div>
+          <div><label className={cLbl}>Directions / dosage</label><textarea value={f.directions ?? ""} onChange={(e) => setF({ ...f, directions: e.target.value })} rows={2} className={cInp} /></div>
+          <div><label className={cLbl}>Safety notes</label><textarea value={f.safety ?? ""} onChange={(e) => setF({ ...f, safety: e.target.value })} rows={2} className={cInp} /></div>
+        </div>
+
+        <Switch on={f.visible !== false} label="Show in Store" desc="Off hides it from shoppers without deleting anything." onChange={(b) => setF({ ...f, visible: b })} />
+
+        <div className="flex flex-wrap gap-2.5 border-t border-forest-800 pt-4">
+          <button onClick={save} disabled={saving} className="flex items-center gap-2 rounded-full bg-gold-400 px-7 py-3 font-mono text-[10.5px] font-semibold uppercase tracking-[0.16em] text-forest-950 hover:bg-gold-300 disabled:opacity-60">
+            {saving ? <RefreshCw size={14} className="animate-spin-fast" /> : <Check size={14} />} {product ? "Save changes" : "Add product"}
+          </button>
           <button onClick={onClose} className="rounded-full border border-forest-700 px-6 py-3 font-mono text-[10.5px] uppercase tracking-[0.16em] text-sand-200/60 hover:text-sand-100">Cancel</button>
         </div>
-      </motion.div>
-    </motion.div>
-  );
-}
-
-/* --------------------------------- customers -------------------------------- */
-
-function CustomersPage() {
-  const { orders } = useApp();
-  const customers = useMemo(() => {
-    const map = new Map<string, { id: string; name: string; contact: string; orders: number; spent: number; joined: string }>();
-    orders.forEach((o) => {
-      const key = o.customerId ?? o.customer.name;
-      const existing = map.get(key);
-      if (existing) { existing.orders += 1; existing.spent += o.total; }
-      else map.set(key, { id: key, name: o.customer.name, contact: o.customer.phone, orders: 1, spent: o.total, joined: o.placedAt });
-    });
-    return [...map.values()];
-  }, [orders]);
-
-  return (
-    <div>
-      <PageHead title="Customers" sub="Everyone who has ordered from the store." />
-      {customers.length === 0 ? <EmptyState icon={Users} title="No customers yet" hint="Shoppers appear here after their first order." /> : (
-        <Card>
-          <div className="hidden grid-cols-[1.4fr_1fr_80px_120px_120px] gap-3 border-b border-forest-800 px-5 py-3 font-mono text-[8.5px] uppercase tracking-[0.16em] text-sand-200/40 md:grid"><span>Customer</span><span>Contact</span><span>Orders</span><span>Total spent</span><span>Joined</span></div>
-          {customers.map((c) => (
-            <div key={c.id} className="grid grid-cols-2 items-center gap-3 border-b border-forest-800 px-5 py-4 last:border-0 hover:bg-forest-850/50 md:grid-cols-[1.4fr_1fr_80px_120px_120px]">
-              <span className="flex items-center gap-3"><span className="grid h-9 w-9 place-items-center rounded-full border border-gold-500/40 bg-gold-400/10 font-display text-sm text-gold-300">{c.name.split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase()}</span><span className="truncate text-[13px] font-semibold text-sand-100">{c.name}</span></span>
-              <span className="truncate font-mono text-[11px] text-sand-200/60">{c.contact}</span>
-              <span className="font-mono text-[12px] text-sand-200/70">{c.orders}</span>
-              <span className="font-display text-[14px] font-semibold text-gold-300">₹{c.spent.toLocaleString("en-IN")}</span>
-              <span className="font-mono text-[10px] text-sand-200/45">{formatDate(c.joined)}</span>
-            </div>
-          ))}
-        </Card>
-      )}
-    </div>
-  );
-}
-
-/* ----------------------------------- staff ---------------------------------- */
-
-function StaffPage() {
-  const { toast, logActivity } = useApp();
-  const [, force] = useState(0);
-  const refresh = () => force((x) => x + 1);
-  const users = auth.list();
-  const me = auth.session();
-
-  const roleDesc: Record<CRole, string> = {
-    superadmin: "Full control — roles, access, store, settings.",
-    editor: "Can view and edit orders, products and content.",
-    viewer: "Read-only — home and analytics only.",
-  };
-
-  const setConsoleRole = (u: StudioUser, r: CRole) => {
-    auth.setPerms(u.id, { consoleRole: r, consoleAccess: true });
-    logActivity("member", `set ${u.name}'s console role to ${r}`);
-    toast(`${u.name} is now a console ${r}`);
-    refresh();
-  };
-  const toggleAccess = (u: StudioUser, on: boolean) => {
-    if (u.id === me?.id) { toast("You can't revoke your own console access"); return; }
-    auth.setPerms(u.id, { consoleAccess: on });
-    logActivity("member", on ? `granted ${u.name} console access` : `revoked ${u.name}'s console access`);
-    toast(on ? `${u.name} can open the console` : `${u.name} locked out of the console`);
-    refresh();
-  };
-
-  return (
-    <div>
-      <PageHead title="Staff & Access" sub="Control who can open the Admin Console and what they can do." />
-      <Card>
-        <div className="hidden grid-cols-[1.4fr_1.2fr_1fr_120px] gap-3 border-b border-forest-800 px-5 py-3 font-mono text-[8.5px] uppercase tracking-[0.16em] text-sand-200/40 md:grid"><span>Member</span><span>Console role</span><span>What they can do</span><span>Dashboard access</span></div>
-        {users.map((u) => (
-          <div key={u.id} className="grid grid-cols-2 items-center gap-3 border-b border-forest-800 px-5 py-4 last:border-0 hover:bg-forest-850/50 md:grid-cols-[1.4fr_1.2fr_1fr_120px]">
-            <span className="flex items-center gap-3"><Monogram author={{ initials: u.name.split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase(), hue: u.hue }} size={36} /><span className="min-w-0"><span className="block truncate text-[13px] font-semibold text-sand-100">{u.name}</span><span className="font-mono text-[8.5px] uppercase tracking-[0.1em] text-sand-200/40">@{u.username} · {u.role}</span></span></span>
-            <select value={u.consoleRole} disabled={u.id === me?.id} onChange={(e) => setConsoleRole(u, e.target.value as CRole)} className="w-full max-w-[180px] rounded-lg border border-forest-700 bg-forest-950/60 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.1em] text-sand-100 focus:border-gold-400 focus:outline-none disabled:opacity-50">
-              <option value="superadmin">Superadmin</option><option value="editor">Editor</option><option value="viewer">Viewer</option>
-            </select>
-            <span className="hidden text-[11.5px] leading-snug text-sand-200/50 md:block">{roleDesc[u.consoleRole]}</span>
-            <SwitchRowMini on={u.consoleAccess} onChange={(b) => toggleAccess(u, b)} />
-          </div>
-        ))}
-      </Card>
-      <p className="mt-4 text-[12px] text-sand-200/40">Revoking access locks the member out of the console immediately — they see a locked screen, not the dashboard. The last active superadmin can't be locked out.</p>
-    </div>
-  );
-}
-
-/* ---------------------------------- content --------------------------------- */
-
-function ContentPage({ role }: { role: CRole }) {
-  const { allArticles, saveDraft, publishArticle, deleteArticle, toast, logActivity } = useApp();
-  const [status, setStatus] = useState<"all" | "published" | "review" | "draft">("all");
-  const canEdit = role !== "viewer";
-  const filtered = allArticles.filter((a) => status === "all" || a.status === status);
-
-  return (
-    <div>
-      <PageHead title="Content" sub="Approve submissions, publish and manage journal essays." />
-      <div className="mb-5 flex flex-wrap gap-2">
-        {(["all", "published", "review", "draft"] as const).map((s) => (
-          <button key={s} onClick={() => setStatus(s)} className={`rounded-full border px-4 py-1.5 font-mono text-[9.5px] uppercase tracking-[0.12em] capitalize ${status === s ? "border-gold-400 bg-gold-400/12 text-gold-300" : "border-forest-700 text-sand-200/55"}`}>{s} · {allArticles.filter((a) => a.status === s).length}</button>
-        ))}
       </div>
-      {filtered.length === 0 ? <EmptyState icon={FileText} title="Nothing here" hint="Articles matching this status will appear here." /> : (
-        <div className="space-y-3">
-          {filtered.map((a) => (
-            <Card key={a.id} className="flex flex-wrap items-center gap-4 p-4">
-              {a.cover ? <SmartImg src={a.cover} alt={a.title} className="h-14 w-20 shrink-0 rounded-lg object-cover duotone" /> : <div className="leaf-field grid h-14 w-20 shrink-0 place-items-center rounded-lg bg-forest-850 font-display text-gold-500/30">वै</div>}
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-[14px] font-semibold text-sand-100">{a.title || "Untitled"}</p>
-                <p className="mt-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-sand-200/40">{formatDate(a.date)} · <span className={a.status === "published" ? "text-kapha-300" : a.status === "review" ? "text-ember-300" : "text-sand-200/50"}>{a.status}</span></p>
-              </div>
-              {canEdit && a.status === "review" && (
-                <button onClick={() => { publishArticle(a); logActivity("approve", `approved & published "${a.title}"`, a.title); toast(`"${a.title}" is live`); }} className="gold-sheen flex items-center gap-1.5 rounded-full bg-kapha-500 px-4 py-2 font-mono text-[9px] font-semibold uppercase tracking-[0.12em] text-forest-950 hover:brightness-110"><Check size={12} /> Approve</button>
-              )}
-              {canEdit && a.status === "published" && (
-                <button onClick={() => { saveDraft({ ...a, status: "draft" }); logActivity("edit", `unpublished "${a.title}"`, a.title); toast("Moved back to drafts"); }} className="flex items-center gap-1.5 rounded-full border border-forest-700 px-4 py-2 font-mono text-[9px] uppercase tracking-[0.12em] text-sand-200/60 hover:border-gold-400 hover:text-gold-300">Unpublish</button>
-              )}
-              {canEdit && (
-                <button onClick={() => { deleteArticle(a.id); logActivity("edit", `deleted "${a.title}"`, a.title); toast("Article deleted"); }} aria-label={`Delete ${a.title}`} className="grid h-8 w-8 place-items-center rounded-full border border-forest-700 text-sand-200/40 hover:border-ember-400 hover:text-ember-300"><Trash2 size={13} /></button>
-              )}
-            </Card>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* --------------------------------- marketing -------------------------------- */
-
-function MarketingPage() {
-  const { toast } = useApp();
-  const [codes, setCodes] = useState(() => {
-    try {
-      const raw = localStorage.getItem("vaidyagan_discount_codes");
-      if (raw) return JSON.parse(raw) as { code: string; type: "percent" | "flat"; value: number; active: boolean }[];
-    } catch { /* fresh */ }
-    return [{ code: "WELCOME10", type: "percent" as const, value: 10, active: true }];
-  });
-  const [form, setForm] = useState({ code: "", type: "percent" as "percent" | "flat", value: 10 });
-
-  const persist = (list: typeof codes) => { setCodes(list); try { localStorage.setItem("vaidyagan_discount_codes", JSON.stringify(list)); } catch { /* ignore */ } };
-  const add = () => {
-    if (!form.code.trim()) { toast("Enter a code"); return; }
-    if (codes.some((c) => c.code.toUpperCase() === form.code.trim().toUpperCase())) { toast("That code already exists"); return; }
-    persist([...codes, { code: form.code.trim().toUpperCase(), type: form.type, value: form.value, active: true }]);
-    setForm({ code: "", type: "percent", value: 10 });
-    toast("Discount code created");
-  };
-
-  return (
-    <div>
-      <PageHead title="Marketing" sub="Discount codes applied automatically at checkout." />
-      <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
-        <Card className="p-6">
-          <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-gold-400">Create a code</p>
-          <div className="mt-4 space-y-3">
-            <input value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} placeholder="e.g. FESTIVE15" className="w-full rounded-lg border border-forest-700 bg-forest-950/60 px-3.5 py-2.5 text-sm uppercase text-sand-100 placeholder:text-sand-200/25 focus:border-gold-400 focus:outline-none" />
-            <div className="flex gap-2">
-              <button onClick={() => setForm({ ...form, type: "percent" })} className={`flex-1 rounded-lg border py-2.5 font-mono text-[10px] uppercase tracking-[0.12em] ${form.type === "percent" ? "border-gold-400 bg-gold-400/12 text-gold-300" : "border-forest-700 text-sand-200/55"}`}>% off</button>
-              <button onClick={() => setForm({ ...form, type: "flat" })} className={`flex-1 rounded-lg border py-2.5 font-mono text-[10px] uppercase tracking-[0.12em] ${form.type === "flat" ? "border-gold-400 bg-gold-400/12 text-gold-300" : "border-forest-700 text-sand-200/55"}`}>₹ off</button>
-            </div>
-            <input type="number" value={form.value} onChange={(e) => setForm({ ...form, value: Number(e.target.value) })} className="w-full rounded-lg border border-forest-700 bg-forest-950/60 px-3.5 py-2.5 text-sm text-sand-100 focus:border-gold-400 focus:outline-none" />
-            <button onClick={add} className="gold-sheen flex w-full items-center justify-center gap-2 rounded-full bg-gold-400 py-3 font-mono text-[10.5px] font-semibold uppercase tracking-[0.16em] text-forest-950 hover:bg-gold-300"><Plus size={14} /> Create code</button>
-          </div>
-        </Card>
-        <Card className="p-6">
-          <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-gold-400">Active codes</p>
-          <div className="mt-4 space-y-2.5">
-            {codes.length === 0 && <p className="rounded-lg border border-dashed border-forest-700 p-6 text-center text-sm text-sand-200/45">No codes yet.</p>}
-            {codes.map((c) => (
-              <div key={c.code} className="flex items-center gap-3 rounded-xl border border-forest-800 bg-forest-850/50 px-4 py-3">
-                <span className="rounded-lg border border-gold-500/40 bg-gold-400/10 px-3 py-1.5 font-mono text-[12px] font-semibold tracking-[0.14em] text-gold-300">{c.code}</span>
-                <span className="font-mono text-[11px] text-sand-200/60">{c.type === "percent" ? `${c.value}% off` : `₹${c.value} off`}</span>
-                <span className="ml-auto" />
-                <SwitchRowMini on={c.active} onChange={(b) => persist(codes.map((x) => (x.code === c.code ? { ...x, active: b } : x)))} />
-                <button onClick={() => persist(codes.filter((x) => x.code !== c.code))} aria-label={`Delete ${c.code}`} className="grid h-8 w-8 place-items-center rounded-full border border-forest-700 text-sand-200/40 hover:border-ember-400 hover:text-ember-300"><Trash2 size={13} /></button>
-              </div>
-            ))}
-          </div>
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-/* --------------------------------- analytics -------------------------------- */
-
-function AnalyticsPage() {
-  const { orders, products } = useApp();
-  const days = useMemo(() => {
-    const map = new Map<string, number>();
-    for (let i = 13; i >= 0; i--) {
-      const d = new Date(Date.now() - i * 86400e3).toISOString().slice(0, 10);
-      map.set(d, 0);
-    }
-    orders.forEach((o) => {
-      const d = o.placedAt.slice(0, 10);
-      if (map.has(d)) map.set(d, (map.get(d) ?? 0) + o.total);
-    });
-    return [...map.entries()];
-  }, [orders]);
-  const max = Math.max(1, ...days.map(([, v]) => v));
-  const statusCounts = (["new", "processing", "shipped", "out", "delivered", "cancelled"] as OrderStatus[]).map((s) => ({ s, n: orders.filter((o) => o.status === s).length }));
-  const topProducts = useMemo(() => {
-    const map = new Map<string, { name: string; revenue: number }>();
-    orders.forEach((o) => o.items.forEach((i) => {
-      const key = i.productId ?? i.name;
-      const ex = map.get(key);
-      if (ex) ex.revenue += i.price * i.qty;
-      else map.set(key, { name: i.name, revenue: i.price * i.qty });
-    }));
-    return [...map.values()].sort((a, b) => b.revenue - a.revenue).slice(0, 5);
-  }, [orders]);
-
-  return (
-    <div>
-      <PageHead title="Analytics" sub="Revenue, order flow and top performers." />
-      <Card className="p-6">
-        <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-gold-400">Revenue — last 14 days</p>
-        <div className="mt-6 flex h-40 items-end gap-2">
-          {days.map(([d, v]) => (
-            <div key={d} className="group flex flex-1 flex-col items-center gap-2">
-              <span className="font-mono text-[8px] text-gold-300 opacity-0 transition-opacity group-hover:opacity-100">₹{v.toLocaleString("en-IN")}</span>
-              <div className="w-full rounded-t-md bg-gradient-to-t from-gold-600 to-gold-300 transition-all hover:brightness-110" style={{ height: `${Math.max(3, (v / max) * 100)}%` }} />
-              <span className="font-mono text-[7.5px] text-sand-200/35">{d.slice(8)}</span>
-            </div>
-          ))}
-        </div>
-      </Card>
-      <div className="mt-6 grid gap-6 lg:grid-cols-2">
-        <Card className="p-6">
-          <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-gold-400">Orders by status</p>
-          <div className="mt-5 space-y-3">
-            {statusCounts.map(({ s, n }) => (
-              <div key={s}>
-                <div className="flex items-center justify-between font-mono text-[9.5px] uppercase tracking-[0.12em]"><span style={{ color: ORDER_META[s].color }}>{ORDER_META[s].label}</span><span className="text-sand-200/50">{n}</span></div>
-                <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-forest-800"><div className="h-full rounded-full transition-all" style={{ width: `${orders.length ? (n / orders.length) * 100 : 0}%`, background: ORDER_META[s].color }} /></div>
-              </div>
-            ))}
-          </div>
-        </Card>
-        <Card className="p-6">
-          <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-gold-400">Top products by revenue</p>
-          <div className="mt-5 space-y-3">
-            {topProducts.length === 0 && <p className="rounded-lg border border-dashed border-forest-700 p-6 text-center text-sm text-sand-200/45">No sales yet.</p>}
-            {topProducts.map((p, i) => (
-              <div key={p.name} className="flex items-center gap-3">
-                <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-gold-400/12 font-mono text-[11px] font-semibold text-gold-300">{i + 1}</span>
-                <span className="min-w-0 flex-1 truncate text-[13px] text-sand-200/80">{p.name}</span>
-                <span className="font-mono text-[12px] text-gold-300">₹{p.revenue.toLocaleString("en-IN")}</span>
-              </div>
-            ))}
-          </div>
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-/* --------------------------------- settings --------------------------------- */
-
-function SettingsPage({ mode, setMode, fb, setFb }: { mode: "demo" | "live"; setMode: (m: "demo" | "live") => void; fb: FBConfig; setFb: (c: FBConfig) => void }) {
-  const { storeEnabled, setStoreEnabled, toast } = useApp();
-  const [showHelp, setShowHelp] = useState(false);
-  const [testResult, setTestResult] = useState<"idle" | "testing" | "ok" | "error">("idle");
-  const [testMsg, setTestMsg] = useState("");
-
-  const save = () => { saveFB(fb); toast("Firebase config saved"); };
-
-  const test = () => {
-    setTestResult("testing");
-    window.setTimeout(() => {
-      if (!fb.projectId.trim()) { setTestResult("error"); setTestMsg("Project ID looks empty — paste it from Project Settings → Your apps."); return; }
-      if (!fb.apiKey.trim()) { setTestResult("error"); setTestMsg("API key is missing — copy it from the firebaseConfig block."); return; }
-      setTestResult("ok");
-      setTestMsg(`Connected to project "${fb.projectId}". You can switch to Live mode.`);
-    }, 900);
-  };
-
-  const inp = "w-full rounded-lg border border-forest-700 bg-forest-950/60 px-3.5 py-2.5 font-mono text-[12px] text-sand-100 placeholder:text-sand-200/25 focus:border-gold-400 focus:outline-none";
-  const fields: [keyof FBConfig, string][] = [
-    ["apiKey", "apiKey"], ["authDomain", "authDomain"], ["projectId", "projectId"],
-    ["storageBucket", "storageBucket"], ["messagingSenderId", "messagingSenderId"], ["appId", "appId"],
-  ];
-
-  const steps = [
-    ["Create a project", "Go to console.firebase.google.com → Add project → name it (e.g. vaidyagan-admin) → Continue."],
-    ["Add a web app", "Project Settings (gear) → General → Your apps → click the web icon </> → register an app."],
-    ["Copy the config", "Copy the six values from the firebaseConfig block and paste them into the boxes here."],
-    ["Enable Google sign-in", "Build → Authentication → Get started → Sign-in method → Google → Enable."],
-    ["Enable Email/Password", "Same screen → Email/Password → Enable."],
-    ["Create Firestore", "Build → Firestore Database → Create database → Start in production mode → choose a region."],
-    ["Enable Storage", "Build → Storage → Get started (production mode)."],
-    ["Paste security rules", "Firestore → Rules tab → paste the rules below → Publish."],
-  ];
-
-  return (
-    <div>
-      <PageHead title="Settings" sub="Connect your database, switch modes and control the public site." />
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card className="p-6">
-          <div className="flex items-center justify-between">
-            <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-gold-400">Database mode</p>
-            <span className={`flex items-center gap-2 rounded-full border px-3 py-1.5 font-mono text-[9px] uppercase tracking-[0.14em] ${mode === "live" ? "border-kapha-500/50 bg-kapha-500/10 text-kapha-300" : "border-gold-500/50 bg-gold-400/10 text-gold-300"}`}>
-              <Database size={12} /> {mode === "live" ? "Live · Firestore" : "Demo · local"}
-            </span>
-          </div>
-          <p className="mt-3 text-[13px] leading-relaxed text-sand-200/60">In Demo mode everything is stored in this browser and works instantly. Switch to Live once your Firebase project is connected.</p>
-          <div className="mt-4 flex rounded-full border border-forest-700 p-1">
-            <button onClick={() => { setMode("demo"); toast("Demo mode — data stored in this browser"); }} className={`flex-1 rounded-full py-2.5 font-mono text-[10px] uppercase tracking-[0.14em] transition-all ${mode === "demo" ? "bg-gold-400 text-forest-950" : "text-sand-200/55"}`}>Demo</button>
-            <button onClick={() => { if (!fb.projectId.trim()) { toast("Paste your Firebase config first"); return; } setMode("live"); toast("Live mode — reading & writing Firestore"); }} className={`flex-1 rounded-full py-2.5 font-mono text-[10px] uppercase tracking-[0.14em] transition-all ${mode === "live" ? "bg-kapha-500 text-forest-950" : "text-sand-200/55"}`}>Live</button>
-          </div>
-          <div className="mt-6 border-t border-forest-800 pt-5">
-            <SwitchRow on={storeEnabled} onChange={(b) => { setStoreEnabled(b); toast(b ? "Public store is live" : "Public store hidden"); }} label="Enable public Store" desc="Turn off to hide the store tab and show a coming-soon screen." />
-          </div>
-        </Card>
-
-        <Card className="p-6">
-          <div className="flex items-center justify-between">
-            <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-gold-400">Connect database (Firebase)</p>
-            <button onClick={() => setShowHelp(!showHelp)} className="font-mono text-[9px] uppercase tracking-[0.12em] text-sand-200/50 hover:text-gold-300">{showHelp ? "Hide help" : "Where do I find these?"}</button>
-          </div>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            {fields.map(([k, label]) => (
-              <div key={k} className={k === "apiKey" || k === "appId" ? "sm:col-span-2" : ""}>
-                <label className="mb-1 block font-mono text-[8.5px] uppercase tracking-[0.14em] text-sand-200/45">{label}</label>
-                <input value={fb[k]} onChange={(e) => setFb({ ...fb, [k]: e.target.value })} placeholder={`paste ${label}…`} className={inp} />
-              </div>
-            ))}
-          </div>
-          <div className="mt-4 flex gap-2.5">
-            <button onClick={save} className="flex items-center gap-2 rounded-full border border-gold-500/50 px-5 py-2.5 font-mono text-[10px] uppercase tracking-[0.14em] text-gold-300 hover:bg-gold-400 hover:text-forest-950">Save config</button>
-            <button onClick={test} disabled={testResult === "testing"} className="gold-sheen flex items-center gap-2 rounded-full bg-gold-400 px-5 py-2.5 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-forest-950 hover:bg-gold-300 disabled:opacity-60">
-              {testResult === "testing" ? <><span className="animate-spin-fast inline-block h-3.5 w-3.5 rounded-full border-2 border-forest-950 border-t-transparent" /> Testing…</> : <><RefreshCw size={13} /> Test connection</>}
-            </button>
-          </div>
-          {testResult === "ok" && <p className="mt-3 rounded-lg border border-kapha-500/40 bg-kapha-500/10 px-4 py-2.5 text-[12.5px] text-kapha-300">✓ {testMsg}</p>}
-          {testResult === "error" && <p className="mt-3 rounded-lg border border-ember-500/40 bg-ember-500/10 px-4 py-2.5 text-[12.5px] text-ember-300">{testMsg}</p>}
-        </Card>
-      </div>
-
-      <AnimatePresence>
-        {showHelp && (
-          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-            <div className="mt-6 grid gap-6 lg:grid-cols-2">
-              <Card className="p-6">
-                <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-gold-400">Setup wizard — where to click</p>
-                <ol className="mt-4 space-y-3">
-                  {steps.map(([title, body], i) => (
-                    <li key={title} className="flex gap-3">
-                      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-gold-400/12 font-mono text-[11px] font-semibold text-gold-300">{i + 1}</span>
-                      <div><p className="text-[13px] font-semibold text-sand-100">{title}</p><p className="mt-0.5 text-[12px] leading-relaxed text-sand-200/55">{body}</p></div>
-                    </li>
-                  ))}
-                </ol>
-              </Card>
-              <Card className="p-6">
-                <div className="flex items-center justify-between">
-                  <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-gold-400">Firestore security rules</p>
-                  <button onClick={() => { navigator.clipboard?.writeText(FIRESTORE_RULES).then(() => toast("Rules copied")).catch(() => toast("Select and copy manually")); }} className="flex items-center gap-1.5 rounded-full border border-forest-700 px-4 py-1.5 font-mono text-[9px] uppercase tracking-[0.12em] text-sand-200/60 hover:border-gold-400 hover:text-gold-300"><Download size={12} /> Copy</button>
-                </div>
-                <pre className="mt-4 overflow-x-auto rounded-xl border border-forest-800 bg-forest-950/80 p-4 font-mono text-[11px] leading-relaxed text-moss-300">{FIRESTORE_RULES}</pre>
-                <p className="mt-4 rounded-lg border border-steel-400/30 bg-steel-400/6 px-4 py-3 text-[12px] leading-relaxed text-steel-300">Seed the founder: in Firestore, create collection <b>admin_users</b>, document id <b>root</b>, with fields <b>role: "superadmin"</b> and <b>access: true</b>.</p>
-              </Card>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
+    </Drawer>
   );
 }
