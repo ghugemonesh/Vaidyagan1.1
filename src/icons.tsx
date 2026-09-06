@@ -287,6 +287,15 @@ export const Shield = (p: IconProps) => (
 export const Activity = (p: IconProps) => (
   <svg {...base(p)}><path d="M3 12h4l2.5-6.5L14 18l2.5-6H21" /></svg>
 );
+export const AlignLeft = (p: IconProps) => (
+  <svg {...base(p)}><path d="M4 6h16M4 10h10M4 14h16M4 18h10" /></svg>
+);
+export const AlignCenter = (p: IconProps) => (
+  <svg {...base(p)}><path d="M4 6h16M7 10h10M4 14h16M7 18h10" /></svg>
+);
+export const AlignJustify = (p: IconProps) => (
+  <svg {...base(p)}><path d="M4 6h16M4 10h16M4 14h16M4 18h16" /></svg>
+);
 export const Diamond = (p: IconProps) => (
   <svg {...base(p)} fill="currentColor" stroke="none"><path d="M12 5l6 7-6 7-6-7 6-7Z" /></svg>
 );

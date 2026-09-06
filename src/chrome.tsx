@@ -21,8 +21,8 @@ const NAV_LINKS: { label: string; view: View }[] = [
 export function Logo({ onClick }: { onClick?: () => void }) {
   return (
     <button onClick={onClick} className="group flex items-center gap-3 text-left" aria-label="Vaidyagan — back to home">
-      <span className="relative grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-[14px] border-2 border-gold-400/70 bg-forest-850 transition-all duration-500 group-hover:border-gold-300 group-hover:shadow-[0_0_24px_rgba(214,180,95,0.4)]">
-        <SmartImg src={BRAND_LOGO_URL} alt="Vaidyagan" className="h-full w-full object-cover" />
+      <span className="relative grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-[18px] border-2 border-gold-400/80 bg-[#f7ecbe] shadow-[0_0_0_3px_rgba(214,180,95,0.12),0_8px_24px_rgba(0,0,0,0.35)] transition-all duration-500 group-hover:border-gold-300 group-hover:shadow-[0_0_0_3px_rgba(214,180,95,0.2),0_0_30px_rgba(232,207,139,0.5)] sm:h-[72px] sm:w-[72px]">
+        <SmartImg src={BRAND_LOGO_URL} alt="वैद्यगण — Vaidyagan" className="h-full w-full scale-[1.5] object-cover transition-transform duration-500 group-hover:scale-[1.6]" />
       </span>
       <span>
         <span className="block font-display text-xl font-semibold leading-none tracking-wide text-sand-100">Vaidyagan</span>

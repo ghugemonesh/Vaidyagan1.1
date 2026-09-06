@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { readImageFile, SmartImg } from "./lib";
-import { Quote, ImageIcon, Video, Eye, Pen, Monitor, Phone, Expand, Compress, List, Close, Check, Upload } from "./icons";
+import { Quote, ImageIcon, Video, Eye, Pen, Monitor, Phone, Expand, Compress, List, Close, Check, Upload, AlignLeft, AlignCenter, AlignJustify } from "./icons";
 
 export interface FmtState { bold: boolean; italic: boolean; underline: boolean; strike: boolean; center: boolean; full: boolean; block: string }
 
@@ -86,9 +86,9 @@ export function EditorToolbar({ edRef, sync, insertShloka, onOpenImage, onOpenVi
         </span>
         <span className="mx-1 h-5 w-px bg-forest-700" />
         <span onMouseDown={keepSel} className="flex items-center gap-1.5">
-          <button onClick={() => exec("justifyLeft")} className={`${btn} ${!fmt.center && !fmt.full ? activeBtn : ""}`} title="Align left" aria-label="Align left"><span className="leading-none">⬅</span></button>
-          <button onClick={() => exec("justifyCenter")} className={`${btn} ${fmt.center ? activeBtn : ""}`} title="Align centre" aria-pressed={fmt.center}><span className="leading-none">⬌</span></button>
-          <button onClick={() => exec("justifyFull")} className={`${btn} ${fmt.full ? activeBtn : ""}`} title="Justify" aria-pressed={fmt.full}><span className="leading-none">☰</span></button>
+          <button onClick={() => exec("justifyLeft")} className={`${btn} ${!fmt.center && !fmt.full ? activeBtn : ""}`} title="Align left" aria-label="Align left" aria-pressed={!fmt.center && !fmt.full}><AlignLeft size={15} /></button>
+          <button onClick={() => exec("justifyCenter")} className={`${btn} ${fmt.center ? activeBtn : ""}`} title="Align centre" aria-label="Align centre" aria-pressed={fmt.center}><AlignCenter size={15} /></button>
+          <button onClick={() => exec("justifyFull")} className={`${btn} ${fmt.full ? activeBtn : ""}`} title="Justify" aria-label="Justify" aria-pressed={fmt.full}><AlignJustify size={15} /></button>
         </span>
         <span className="mx-1 h-5 w-px bg-forest-700" />
         <span onMouseDown={keepSel} className="flex items-center gap-1.5">

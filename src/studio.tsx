@@ -6,7 +6,7 @@ import {
   LayoutGrid, ShoppingCart, Shield, Settings as SettingsIcon, User as UserIcon, Leaf,
   ListTree, Youtube, Maximize2, Minimize2, FileUp, CalendarDays,
 } from "lucide-react";
-import { useApp, auth, readImageFile, SmartImg, Monogram, type StudioUser } from "./lib";
+import { useApp, auth, readImageFile, SmartImg, Monogram, type StudioUser, type StudioPerms } from "./lib";
 import { CATEGORIES, IMG, KIND_META, articleHtml, authorFor, formatDate, type Article, type Kind } from "./data";
 import { DoctorProfileTab, blankProfile, profileFor } from "./doctor-profile";
 import { HerbManager } from "./herbs-admin";
@@ -66,6 +66,27 @@ function LoginScreen({ onLogin }: { onLogin: (u: StudioUser) => void }) {
 
 /* --------------------------------- members ---------------------------------- */
 
+/** iPhone-style permission switch used in the member profile panel. */
+function PermSwitch({ on, onToggle, label, desc, disabled }: { on: boolean; onToggle: (b: boolean) => void; label: string; desc: string; disabled?: boolean }) {
+  return (
+    <button
+      role="switch" aria-checked={on} disabled={disabled}
+      onClick={() => onToggle(!on)}
+      className={`flex items-center justify-between gap-3 rounded-xl border p-3 text-left transition-all duration-300 ${disabled ? "cursor-not-allowed opacity-50" : ""} ${
+        on ? "border-kapha-500/50 bg-kapha-500/8" : "border-forest-700 bg-forest-950/40 hover:border-forest-600"
+      }`}
+    >
+      <span className="min-w-0">
+        <span className={`block text-[12.5px] font-semibold ${on ? "text-sand-100" : "text-sand-200/70"}`}>{label}</span>
+        <span className="mt-0.5 block text-[10.5px] leading-snug text-sand-200/45">{desc}</span>
+      </span>
+      <span className={`relative h-6 w-11 shrink-0 rounded-full transition-colors duration-300 ${on ? "bg-kapha-500" : "bg-forest-700"}`}>
+        <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-sand-100 shadow transition-all duration-300 ${on ? "left-[22px]" : "left-0.5"}`} />
+      </span>
+    </button>
+  );
+}
+
 function MembersModal({ onClose }: { onClose: () => void }) {
   const { toast, logActivity } = useApp();
   const [, force] = useState(0);
@@ -75,6 +96,15 @@ function MembersModal({ onClose }: { onClose: () => void }) {
   const [resetFor, setResetFor] = useState<string | null>(null);
   const [newPass, setNewPass] = useState("");
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
+  const [openPerms, setOpenPerms] = useState<string | null>(null);
+
+  /** Grant / revoke one permission for a member (superadmin control). */
+  const setPerm = (u: StudioUser, key: keyof StudioPerms, value: boolean, label: string) => {
+    auth.setPerms(u.id, { [key]: value } as Partial<StudioPerms>);
+    logActivity("member", `${value ? "granted" : "revoked"} "${label}" for ${u.name}`);
+    toast(`${u.name} — ${label} ${value ? "granted" : "revoked"}`);
+    refresh();
+  };
 
   const add = () => {
     if (!form.name.trim() || !form.username.trim() || form.password.length < 4) { toast("Name, username and a 4+ character password are required"); return; }
@@ -101,8 +131,12 @@ function MembersModal({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="mt-6 space-y-3">
-          {users.map((u) => (
-            <div key={u.id} className={`flex flex-wrap items-center gap-3 rounded-xl border p-4 ${u.id === "root" ? "border-gold-500/40 bg-gold-400/5" : "border-forest-800 bg-forest-850/50"}`}>
+          {users.map((u) => {
+            const isRoot = u.id === "root";
+            const showPerms = openPerms === u.id;
+            return (
+            <div key={u.id} className={`rounded-xl border p-4 transition-colors ${isRoot ? "border-gold-500/40 bg-gold-400/5" : "border-forest-800 bg-forest-850/50"}`}>
+            <div className="flex flex-wrap items-center gap-3">
               <Monogram author={{ initials: u.name.split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase(), hue: u.hue }} size={40} />
               <div className="min-w-0 flex-1">
                 <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-sand-100">
