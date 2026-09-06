@@ -191,6 +191,20 @@ function loadDeletedPostIds(): string[] {
 }
 function persistDeletedPostIds(ids: string[]) { try { localStorage.setItem(DELETED_POSTS_KEY, JSON.stringify(ids)); } catch { /* ignore */ } }
 
+/** Console-bell notification (same storage shape as console/db, no circular import). */
+function pushNotif(n: { title: string; body: string; icon: string }) {
+  try {
+    const KEY = "vaidyagan_notifications_v1";
+    const raw = localStorage.getItem(KEY);
+    const list = raw ? (JSON.parse(raw) as unknown[]) : [];
+    (list as { id: string; title: string; body: string; icon: string; read: boolean; at: string }[]).unshift({
+      id: `n-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      ...n, read: false, at: new Date().toISOString(),
+    });
+    localStorage.setItem(KEY, JSON.stringify(list.slice(0, 60)));
+  } catch { /* notifications must never break checkout */ }
+}
+
 function loadHerbs(): Herb[] {
   try {
     const raw = localStorage.getItem(HERBS_KEY);
@@ -257,7 +271,7 @@ interface AppCtx {
   publishArticle: (a: Article) => void; deleteUserPost: (id: string) => void; deleteArticle: (id: string) => void;
   herbs: Herb[]; saveHerb: (h: Herb) => void; deleteHerb: (id: string) => void; resetHerbs: () => void;
   products: Product[]; saveProduct: (p: Product) => void; deleteProduct: (id: string) => void;
-  orders: Order[]; placeOrder: (c: OrderCustomer, paymentMethod?: string) => Order;
+  orders: Order[]; placeOrder: (c: OrderCustomer, paymentMethod?: string, extra?: { discountCode?: string; discountAmount?: number; shippingFee?: number }) => Order;
   updateOrderStatus: (id: string, s: OrderStatus) => void; cancelAndRestock: (id: string) => void;
   storeEnabled: boolean; setStoreEnabled: (b: boolean) => void;
   profileTabEnabled: boolean; setProfileTabEnabled: (b: boolean) => void;
@@ -411,15 +425,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return next;
     });
   }, []);
-  const placeOrder = useCallback((cust: OrderCustomer, paymentMethod?: string): Order => {
+  const placeOrder = useCallback((
+    cust: OrderCustomer,
+    paymentMethod?: string,
+    extra?: { discountCode?: string; discountAmount?: number; shippingFee?: number },
+  ): Order => {
     const items = cart.map((l) => {
       const p = products.find((x) => x.id === l.id);
       return { name: p?.name ?? "Formulation", qty: l.qty, price: p?.price ?? 0, productId: p?.id, image: p?.image };
     });
-    const total = items.reduce((s, i) => s + i.price * i.qty, 0);
+    const itemsTotal = items.reduce((s, i) => s + i.price * i.qty, 0);
+    const discount = Math.min(extra?.discountAmount ?? 0, itemsTotal);
+    const total = Math.max(0, itemsTotal - discount) + (extra?.shippingFee ?? 0);
     const order: Order = {
       id: `VG-${Math.floor(1000 + Math.random() * 9000)}`, customer: cust, items, total,
       status: "new", placedAt: new Date().toISOString(), customerId: customer?.id, paymentMethod,
+      discountCode: extra?.discountCode, discountAmount: discount || undefined, shippingFee: extra?.shippingFee,
     };
     setOrders((o) => {
       const next = [order, ...o];
@@ -429,11 +450,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setProducts((list) => {
       const next = list.map((p) => {
         const line = cart.find((l) => l.id === p.id);
-        return line ? { ...p, stock: Math.max(0, p.stock - line.qty) } : p;
+        if (!line) return p;
+        const stock = Math.max(0, p.stock - line.qty);
+        if (stock > 0 && stock < 5) {
+          pushNotif({ title: `Low stock — ${p.name}`, body: `Only ${stock} unit${stock === 1 ? "" : "s"} left after order ${order.id}.`, icon: "stock" });
+        }
+        return { ...p, stock };
       });
       try { localStorage.setItem(PRODUCTS_KEY, JSON.stringify(next)); } catch { /* ignore */ }
       return next;
     });
+    pushNotif({ title: `New order ${order.id}`, body: `${cust.name} · ₹${total.toLocaleString("en-IN")} · ${paymentMethod ?? "—"}`, icon: "order" });
     setCart([]);
     return order;
   }, [cart, products, customer]);

@@ -313,6 +313,7 @@ export interface Order {
   id: string; customer: OrderCustomer;
   items: { name: string; qty: number; price: number; productId?: string; image?: string }[];
   total: number; status: OrderStatus; placedAt: string; customerId?: string; paymentMethod?: string;
+  discountCode?: string; discountAmount?: number; shippingFee?: number;
 }
 
 export const SEED_ORDERS: Order[] = [

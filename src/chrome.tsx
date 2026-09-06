@@ -3,9 +3,11 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   Leaf, ShoppingBag, Menu, X, ArrowRight, Check, Instagram, Plus, Minus, Trash2,
   Mail, Phone, MapPin, User, LogOut, Send, ChevronDown, Star, Lock,
+  CreditCard, Banknote, Smartphone, RefreshCw, ShieldCheck, ChevronLeft,
 } from "lucide-react";
 import { useApp, Monogram, SmartImg, type View } from "./lib";
-import { AUTHORS, BRAND_LOGO_URL, FREE_SHIP_AT, type Order } from "./data";
+import { AUTHORS, BRAND_LOGO_URL, FREE_SHIP_AT, type Order, type Product } from "./data";
+import { getConsoleSettings, validateDiscount } from "./console/db";
 
 const NAV_LINKS: { label: string; view: View }[] = [
   { label: "Journal", view: { name: "journal" } },
@@ -152,9 +154,11 @@ export function Nav() {
 /* ---------------------------------- cart ------------------------------------ */
 
 export function CartDrawer() {
-  const { cart, cartOpen, setCartOpen, changeQty, removeLine, products, storeEnabled } = useApp();
+  const { cart, cartOpen, setCartOpen, changeQty, removeLine, products, storeEnabled, customer } = useApp();
   const [checkout, setCheckout] = useState(false);
-  const lines = cart.map((l) => ({ ...l, product: products.find((p) => p.id === l.id) })).filter((l) => l.product);
+  const lines = cart
+    .map((l) => ({ ...l, product: products.find((p) => p.id === l.id) }))
+    .filter((l): l is { id: string; qty: number; product: Product } => !!l.product);
   const subtotal = lines.reduce((s, l) => s + (l.product?.price ?? 0) * l.qty, 0);
   const progress = Math.min(100, (subtotal / FREE_SHIP_AT) * 100);
 
@@ -219,12 +223,17 @@ export function CartDrawer() {
                   </div>
                   <button onClick={() => setCheckout(true)} disabled={lines.length === 0}
                     className="mt-4 flex w-full items-center justify-center gap-2 rounded-full bg-gold-400 py-3.5 font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-forest-950 transition-all hover:bg-gold-300 disabled:opacity-35">
-                    Proceed to checkout <ArrowRight size={15} />
+                    {customer ? "Proceed to checkout" : (<><Lock size={14} /> Sign in to checkout</>)} <ArrowRight size={15} />
                   </button>
+                  {!customer && (
+                    <p className="mt-2.5 text-center font-mono text-[8.5px] uppercase tracking-[0.16em] text-sand-200/35">
+                      OTP, Google or email — your basket stays safe
+                    </p>
+                  )}
                 </div>
               </>
             ) : (
-              <CheckoutFlow subtotal={subtotal} onDone={() => { setCheckout(false); setCartOpen(false); }} />
+              <CheckoutFlow subtotal={subtotal} lines={lines} onDone={() => { setCheckout(false); setCartOpen(false); }} />
             )}
           </motion.aside>
         </>
@@ -233,87 +242,374 @@ export function CartDrawer() {
   );
 }
 
-function CheckoutFlow({ subtotal, onDone }: { subtotal: number; onDone: () => void }) {
-  const { placeOrder, toast, customer, saveAddress, navigate, setCartOpen } = useApp();
-  const [step, setStep] = useState(0);
+/* ============================ checkout (Flipkart-style) ========================
+   Step 0  Sign in    — guests only; OTP (demo code shown), Google, or email.
+   Step 1  Delivery   — ship-to details with a saved-address picker.
+   Step 2  Payment    — method, promo code, itemised summary, confirm & pay.
+   Step 3  Confirmed  — order id, tracking shortcut.
+   Nothing is ordered until the shopper presses "Confirm & place order".       */
+
+type CartLineView = { id: string; qty: number; product: Product };
+
+function CheckoutFlow({ subtotal, lines, onDone }: { subtotal: number; lines: CartLineView[]; onDone: () => void }) {
+  const { placeOrder, toast, customer, saveAddress, navigate, loginOtp, loginGoogle, loginEmail, registerEmail } = useApp();
+  const startedSignedIn = useRef(!!customer);
+
+  const [step, setStep] = useState<0 | 1 | 2 | 3>(customer ? 1 : 0);
   const [placed, setPlaced] = useState<Order | null>(null);
-  const [pay, setPay] = useState("UPI");
-  const [saveAddr, setSaveAddr] = useState(true);
+  const [processing, setProcessing] = useState(false);
+
+  /* sign-in (step 0) */
+  const [authTab, setAuthTab] = useState<"otp" | "google" | "email">("otp");
+  const [phone, setPhone] = useState("");
+  const [otpCode, setOtpCode] = useState<string | null>(null);
+  const [otpInput, setOtpInput] = useState("");
+  const [em, setEm] = useState({ name: "", email: "", password: "" });
+  const [emMode, setEmMode] = useState<"in" | "up">("in");
+  const [emErr, setEmErr] = useState("");
+
+  /* delivery (step 1) */
   const [form, setForm] = useState(() => {
     const d = customer?.addresses.find((a) => a.isDefault) ?? customer?.addresses[0];
     return { name: customer?.name ?? "", phone: d?.phone || customer?.phone || "", address: d?.line1 ?? "", city: d?.city ?? "", pin: d?.pin ?? "" };
   });
+  const [saveAddr, setSaveAddr] = useState(true);
+
+  /* payment (step 2) */
+  const settings = (() => { try { return getConsoleSettings(); } catch { return null; } })();
+  const [pay, setPay] = useState("UPI");
+  const [promo, setPromo] = useState("");
+  const [applied, setApplied] = useState<{ code: string; amount: number } | null>(null);
+  const [promoErr, setPromoErr] = useState("");
+
+  /* a guest who signs in mid-flow moves straight to delivery — never past it */
+  useEffect(() => { if (customer && step === 0 && !processing) setStep(1); }, [customer, step, processing]);
+
+  /* basket emptied mid-flow → friendly dead end, never a crash */
+  if (lines.length === 0 && step < 3) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center px-6 text-center">
+        <ShoppingBag size={36} className="text-forest-700" />
+        <p className="mt-4 font-display text-xl text-sand-200/80">Your basket is empty</p>
+        <p className="mt-2 max-w-[260px] text-sm text-sand-200/45">Add a formulation first — checkout will wait for you.</p>
+        <button onClick={onDone} className="mt-6 rounded-full border border-gold-500/50 px-6 py-2.5 font-mono text-[10px] uppercase tracking-[0.16em] text-gold-300 hover:bg-gold-400 hover:text-forest-950">Back to basket</button>
+      </div>
+    );
+  }
+
+  const freeAt = settings?.freeShipAt || FREE_SHIP_AT;
+  const shipFee = subtotal >= freeAt ? 0 : settings?.shipFee ?? 0;
+  const discount = applied?.amount ?? 0;
+  const grand = Math.max(0, subtotal - discount) + shipFee;
+
+  const sendOtp = () => {
+    const digits = phone.replace(/\D/g, "");
+    if (digits.length < 10) { toast("Enter a 10-digit mobile number"); return; }
+    const code = String(Math.floor(1000 + Math.random() * 9000));
+    setOtpCode(code); setOtpInput("");
+    toast(`OTP sent to +91 ${digits} (demo code: ${code})`);
+  };
+  const verifyOtp = () => {
+    if (!otpCode) return;
+    if (otpInput !== otpCode) { setEmErr(""); toast("That code doesn't match — try again"); return; }
+    loginOtp(phone.replace(/\D/g, ""));
+    toast("Signed in — welcome back");
+  };
+  const submitEmail = () => {
+    setEmErr("");
+    if (emMode === "up") {
+      if (!em.name.trim()) { setEmErr("Please tell us your name"); return; }
+      if (em.password.length < 4) { setEmErr("Password needs at least 4 characters"); return; }
+      const c = registerEmail(em.name.trim(), em.email.trim(), em.password);
+      if (!c) { setEmErr("That email already has an account — sign in instead."); return; }
+      toast(`Account created — welcome, ${c.name.split(" ")[0]}`);
+    } else {
+      const c = loginEmail(em.email.trim(), em.password);
+      if (!c) { setEmErr("No account matches that email and password."); return; }
+      toast(`Signed in — welcome back, ${c.name.split(" ")[0]}`);
+    }
+  };
+  const applyPromo = () => {
+    if (!promo.trim()) return;
+    try {
+      const res = validateDiscount(promo.trim(), subtotal);
+      if (res.ok && res.discount && res.amount > 0) {
+        setApplied({ code: res.discount.code, amount: res.amount }); setPromoErr("");
+        toast(`Code ${res.discount.code} applied — you save ₹${res.amount.toLocaleString("en-IN")}`);
+      } else {
+        setApplied(null);
+        setPromoErr((res as { reason?: string }).reason ?? "That code didn't work");
+      }
+    } catch { setApplied(null); setPromoErr("Could not check that code"); }
+  };
 
   const finish = () => {
-    const order = placeOrder(form, pay);
-    if (customer && saveAddr && form.address.trim()) {
-      saveAddress({ id: `addr-${Date.now()}`, label: "Home", name: form.name, phone: form.phone, line1: form.address, city: form.city, state: "", pin: form.pin, isDefault: customer.addresses.length === 0 });
-    }
-    setPlaced(order);
-    setStep(2);
-    toast(`Order ${order.id} placed — the desk has been notified`);
+    if (processing || !customer) return;
+    setProcessing(true);
+    /* short payment-processing beat so the confirm step feels real (and double-taps can't double-order) */
+    window.setTimeout(() => {
+      const order = placeOrder(form, pay, { discountCode: applied?.code, discountAmount: discount || undefined, shippingFee: shipFee || undefined });
+      if (saveAddr && form.address.trim()) {
+        saveAddress({ id: `addr-${Date.now()}`, label: "Home", name: form.name, phone: form.phone, line1: form.address, city: form.city, state: "", pin: form.pin, isDefault: customer.addresses.length === 0 });
+      }
+      setPlaced(order);
+      setStep(3);
+      setProcessing(false);
+      toast(`Order ${order.id} placed — the desk has been notified`);
+    }, 1100);
   };
 
   const input = "w-full rounded-lg border border-forest-700 bg-forest-950/60 px-3.5 py-2.5 text-sm text-sand-100 placeholder:text-sand-200/30 focus:border-gold-400 focus:outline-none";
+  /* steps the shopper sees; signed-in shoppers skip the sign-in step entirely */
+  const stepLabels = startedSignedIn.current ? ["Delivery", "Payment"] : ["Sign in", "Delivery", "Payment"];
+  const offset = startedSignedIn.current ? 1 : 0; // index of the current step within stepLabels
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b border-forest-800 px-6 py-5">
-        <p className="font-display text-2xl font-semibold text-sand-100">{step === 0 ? "Delivery" : step === 1 ? "Payment" : "Confirmed"}</p>
-        {step < 2 && (
-          <button onClick={() => (step === 0 ? onDone() : setStep(0))} className="font-mono text-[10px] uppercase tracking-[0.16em] text-sand-200/50 hover:text-gold-300">Back</button>
+      <div className="flex items-center justify-between gap-3 border-b border-forest-800 px-6 py-4">
+        <div className="min-w-0">
+          <p className="font-display text-xl font-semibold leading-none text-sand-100">
+            {step === 0 ? "Sign in" : step === 1 ? "Delivery details" : step === 2 ? "Payment" : "Order confirmed"}
+          </p>
+          <div className="mt-2 flex items-center gap-2">
+            {stepLabels.map((label, i) => {
+              const done = step > i + offset;
+              const active = step === i + offset;
+              return (
+                <React.Fragment key={label}>
+                  {i > 0 && <span className={`h-px w-5 ${done || active ? "bg-gold-500" : "bg-forest-700"}`} />}
+                  <span className={`flex items-center gap-1.5 font-mono text-[8px] uppercase tracking-[0.12em] ${done ? "text-gold-300" : active ? "text-sand-100" : "text-sand-200/35"}`}>
+                    <span className={`grid h-4 w-4 place-items-center rounded-full border text-[7px] ${done ? "border-gold-400 bg-gold-400 text-forest-950" : active ? "border-gold-400 text-gold-300" : "border-forest-600"}`}>{done ? <Check size={8} /> : i + 1}</span>
+                    {label}
+                  </span>
+                </React.Fragment>
+              );
+            })}
+          </div>
+        </div>
+        {step < 3 && !processing && (
+          <button onClick={() => (step === 0 ? onDone() : step === 1 ? (startedSignedIn.current ? onDone() : setStep(0)) : setStep(1))}
+            className="flex shrink-0 items-center gap-1 font-mono text-[10px] uppercase tracking-[0.14em] text-sand-200/50 hover:text-gold-300" aria-label="Go back">
+            <ChevronLeft size={13} /> Back
+          </button>
         )}
       </div>
+
       <div className="flex-1 overflow-y-auto px-6 py-6">
+        {/* ------------------------------ STEP 0 · SIGN IN ------------------------------ */}
         {step === 0 && (
-          <div className="space-y-3.5">
+          <div className="space-y-5">
+            <p className="text-[13px] leading-relaxed text-sand-200/60">
+              Sign in to place your order — your basket is safe and waiting. New here? An account is created for you automatically.
+            </p>
+            <div className="flex gap-2">
+              {([["otp", "Mobile OTP", Smartphone], ["google", "Google", User], ["email", "Email", Mail]] as ["otp" | "google" | "email", string, React.ComponentType<{ size?: number }>][]).map(([k, label, Icon]) => (
+                <button key={k} onClick={() => { setAuthTab(k); setEmErr(""); }}
+                  className={`flex flex-1 items-center justify-center gap-2 rounded-xl border py-3 font-mono text-[9px] uppercase tracking-[0.12em] transition-all ${authTab === k ? "border-gold-400 bg-gold-400/12 text-gold-300" : "border-forest-700 text-sand-200/55 hover:text-sand-100"}`}>
+                  <Icon size={14} /> {label}
+                </button>
+              ))}
+            </div>
+
+            {authTab === "otp" && (
+              <div className="space-y-3.5">
+                {!otpCode ? (
+                  <>
+                    <div>
+                      <label className="mb-1.5 block font-mono text-[9.5px] uppercase tracking-[0.18em] text-gold-400/80">Mobile number</label>
+                      <div className="flex gap-2">
+                        <span className="grid place-items-center rounded-lg border border-forest-700 bg-forest-950/60 px-3 font-mono text-sm text-sand-200/60">+91</span>
+                        <input value={phone} onChange={(e) => setPhone(e.target.value.replace(/[^\d ]/g, ""))} placeholder="98220 12345" inputMode="tel" className={input} />
+                      </div>
+                    </div>
+                    <button onClick={sendOtp} className="w-full rounded-full bg-gold-400 py-3.5 font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-forest-950 transition-all hover:bg-gold-300">Send OTP</button>
+                  </>
+                ) : (
+                  <>
+                    <div className="rounded-xl border border-gold-500/35 bg-gold-400/6 px-4 py-3 text-[12.5px] text-gold-300">
+                      Demo OTP: <b className="font-mono tracking-[0.3em]">{otpCode}</b> <span className="text-sand-200/45">(in production this arrives by SMS)</span>
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block font-mono text-[9.5px] uppercase tracking-[0.18em] text-gold-400/80">Enter the 4-digit code</label>
+                      <input value={otpInput} onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="••••" inputMode="numeric" className={`${input} text-center font-mono text-xl tracking-[0.5em]`} />
+                    </div>
+                    <button onClick={verifyOtp} disabled={otpInput.length < 4} className="w-full rounded-full bg-gold-400 py-3.5 font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-forest-950 transition-all hover:bg-gold-300 disabled:opacity-35">Verify & continue</button>
+                    <button onClick={() => setOtpCode(null)} className="w-full text-center font-mono text-[9px] uppercase tracking-[0.14em] text-sand-200/40 hover:text-gold-300">Use a different number</button>
+                  </>
+                )}
+              </div>
+            )}
+
+            {authTab === "google" && (
+              <div className="space-y-2.5">
+                <p className="text-[12.5px] text-sand-200/55">Choose a Google account to continue:</p>
+                {[["Aarav Mehta", "aarav.mehta@gmail.com"], ["Priya Nair", "priya.nair@gmail.com"], ["Rohan Kulkarni", "rohan.kulkarni@gmail.com"]].map(([name, email]) => (
+                  <button key={email} onClick={() => { loginGoogle(email, name); toast(`Signed in as ${name}`); }}
+                    className="flex w-full items-center gap-3 rounded-xl border border-forest-700 bg-forest-950/50 px-4 py-3 text-left transition-all hover:border-gold-400 hover:bg-forest-850">
+                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-gradient-to-br from-gold-400 to-kapha-500 font-display text-sm font-semibold text-forest-950">{name[0]}</span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-[13px] font-semibold text-sand-100">{name}</span>
+                      <span className="block truncate font-mono text-[9.5px] text-sand-200/40">{email}</span>
+                    </span>
+                    <ShieldCheck size={15} className="ml-auto shrink-0 text-kapha-400" />
+                  </button>
+                ))}
+                <p className="text-center font-mono text-[8.5px] uppercase tracking-[0.14em] text-sand-200/35">Simulated Google OAuth — real popup in production</p>
+              </div>
+            )}
+
+            {authTab === "email" && (
+              <div className="space-y-3.5">
+                <div className="flex gap-2">
+                  {([["in", "Sign in"], ["up", "Create account"]] as ["in" | "up", string][]).map(([k, label]) => (
+                    <button key={k} onClick={() => { setEmMode(k); setEmErr(""); }}
+                      className={`flex-1 rounded-full border py-2 font-mono text-[9px] uppercase tracking-[0.12em] transition-all ${emMode === k ? "border-gold-400 bg-gold-400/12 text-gold-300" : "border-forest-700 text-sand-200/55"}`}>{label}</button>
+                  ))}
+                </div>
+                {emMode === "up" && (
+                  <div><label className="mb-1.5 block font-mono text-[9.5px] uppercase tracking-[0.18em] text-gold-400/80">Full name</label>
+                    <input value={em.name} onChange={(e) => setEm({ ...em, name: e.target.value })} placeholder="Dr. …" className={input} /></div>
+                )}
+                <div><label className="mb-1.5 block font-mono text-[9.5px] uppercase tracking-[0.18em] text-gold-400/80">Email</label>
+                  <input value={em.email} onChange={(e) => setEm({ ...em, email: e.target.value })} placeholder="you@example.com" type="email" className={input} /></div>
+                <div><label className="mb-1.5 block font-mono text-[9.5px] uppercase tracking-[0.18em] text-gold-400/80">Password</label>
+                  <input value={em.password} onChange={(e) => setEm({ ...em, password: e.target.value })} type="password" placeholder={emMode === "up" ? "Choose a password (4+ characters)" : "Your password"} className={input} /></div>
+                {emErr && <p className="rounded-lg border border-ember-500/40 bg-ember-500/8 px-4 py-2.5 text-[12.5px] text-ember-300">{emErr}</p>}
+                <button onClick={submitEmail} className="w-full rounded-full bg-gold-400 py-3.5 font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-forest-950 transition-all hover:bg-gold-300">
+                  {emMode === "up" ? "Create account & continue" : "Sign in & continue"}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ------------------------------ STEP 1 · DELIVERY ------------------------------ */}
+        {step === 1 && customer && (
+          <div className="space-y-4">
+            {customer.addresses.length > 0 && (
+              <div>
+                <p className="mb-2 font-mono text-[9.5px] uppercase tracking-[0.18em] text-gold-400/80">Saved addresses</p>
+                <div className="space-y-2">
+                  {customer.addresses.map((a) => (
+                    <button key={a.id} onClick={() => setForm({ name: a.name || customer.name, phone: a.phone, address: a.line1, city: a.city, pin: a.pin })}
+                      className="flex w-full items-start gap-3 rounded-xl border border-forest-700 bg-forest-950/50 px-4 py-3 text-left transition-all hover:border-gold-400">
+                      <MapPin size={15} className="mt-0.5 shrink-0 text-gold-400" />
+                      <span className="min-w-0">
+                        <span className="flex items-center gap-2 text-[13px] font-semibold text-sand-100">{a.label}{a.isDefault && <span className="rounded-full bg-gold-400/15 px-2 py-0.5 font-mono text-[7.5px] uppercase tracking-[0.1em] text-gold-300">Default</span>}</span>
+                        <span className="mt-0.5 block text-[11.5px] leading-relaxed text-sand-200/55">{a.line1}, {a.city} — {a.pin}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-2 font-mono text-[8.5px] uppercase tracking-[0.14em] text-sand-200/35">…or enter a new address below</p>
+              </div>
+            )}
             {([["Full name", "name", "Dr. …"], ["Phone", "phone", "+91 …"], ["Address", "address", "Flat, street, landmark"], ["City", "city", "Pune"], ["PIN code", "pin", "411001"]] as [string, keyof typeof form, string][]).map(([label, key, ph]) => (
               <div key={key}>
                 <label className="mb-1.5 block font-mono text-[9.5px] uppercase tracking-[0.18em] text-gold-400/80">{label}</label>
                 <input value={form[key]} onChange={(e) => setForm({ ...form, [key]: e.target.value })} placeholder={ph} className={input} />
               </div>
             ))}
-            <button onClick={() => setStep(1)} disabled={Object.values(form).some((v) => !v.trim())}
-              className="mt-2 w-full rounded-full bg-gold-400 py-3.5 font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-forest-950 transition-all hover:bg-gold-300 disabled:opacity-35">
-              Continue to payment
+            <label className="flex cursor-pointer items-center gap-2.5 text-sm text-sand-200/70">
+              <input type="checkbox" checked={saveAddr} onChange={(e) => setSaveAddr(e.target.checked)} className="accent-[#d6b45f]" />
+              Save this address to my account
+            </label>
+            <button onClick={() => setStep(2)} disabled={Object.values(form).some((v) => !v.trim())}
+              className="mt-1 w-full rounded-full bg-gold-400 py-3.5 font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-forest-950 transition-all hover:bg-gold-300 disabled:opacity-35">
+              Continue to payment <ArrowRight size={14} className="ml-1 inline" />
             </button>
           </div>
         )}
-        {step === 1 && (
-          <div>
-            <div className="rounded-xl border border-forest-800 bg-forest-850/60 p-5">
-              <div className="flex items-center justify-between">
-                <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-sand-200/60">Order total</span>
-                <span className="font-display text-2xl font-semibold text-sand-100">₹{subtotal.toLocaleString("en-IN")}</span>
+
+        {/* ------------------------------ STEP 2 · PAYMENT ------------------------------ */}
+        {step === 2 && customer && (
+          <div className="space-y-5">
+            <div>
+              <p className="mb-2 font-mono text-[9.5px] uppercase tracking-[0.18em] text-gold-400/80">Your items</p>
+              <div className="space-y-2">
+                {lines.map((l) => (
+                  <div key={l.id} className="flex items-center gap-3 rounded-xl border border-forest-800 bg-forest-850/50 p-2.5">
+                    <SmartImg src={l.product.image} alt={l.product.name} className="h-11 w-11 shrink-0 rounded-lg object-cover duotone" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[12.5px] font-semibold text-sand-100">{l.product.name}</span>
+                      <span className="font-mono text-[9.5px] text-sand-200/45">₹{l.product.price.toLocaleString("en-IN")} × {l.qty}</span>
+                    </span>
+                    <span className="font-mono text-[12px] text-sand-100">₹{(l.product.price * l.qty).toLocaleString("en-IN")}</span>
+                  </div>
+                ))}
               </div>
-              <p className="mt-2 text-xs leading-relaxed text-sand-200/50">Demo checkout — no money moves. In production this step opens Razorpay (UPI, cards, net-banking).</p>
             </div>
-            <div className="mt-5 space-y-2.5">
-              {["UPI — vaidyagan@upi", "Card — sandbox 4242…", "Cash on delivery"].map((m, i) => (
-                <label key={m} className="flex cursor-pointer items-center gap-3 rounded-lg border border-forest-700 px-4 py-3 transition-all hover:border-gold-400">
-                  <input type="radio" name="pay" checked={pay === m.split(" ")[0]} onChange={() => setPay(m.split(" ")[0])} className="accent-[#d6b45f]" />
-                  <span className="text-sm text-sand-100">{m}</span>
-                </label>
-              ))}
+
+            <div>
+              <p className="mb-2 font-mono text-[9.5px] uppercase tracking-[0.18em] text-gold-400/80">Payment method</p>
+              <div className="space-y-2">
+                {settings?.paymentUPI !== false && (
+                  <label className={`flex cursor-pointer items-center gap-3 rounded-xl border px-4 py-3 transition-all ${pay === "UPI" ? "border-gold-400 bg-gold-400/8" : "border-forest-700 hover:border-gold-500/50"}`}>
+                    <input type="radio" name="pay" checked={pay === "UPI"} onChange={() => setPay("UPI")} className="accent-[#d6b45f]" />
+                    <Smartphone size={16} className="text-gold-400" />
+                    <span className="text-sm text-sand-100">UPI <span className="font-mono text-[9px] text-sand-200/40">vaidyagan@upi</span></span>
+                  </label>
+                )}
+                {settings?.paymentCard !== false && (
+                  <label className={`flex cursor-pointer items-center gap-3 rounded-xl border px-4 py-3 transition-all ${pay === "Card" ? "border-gold-400 bg-gold-400/8" : "border-forest-700 hover:border-gold-500/50"}`}>
+                    <input type="radio" name="pay" checked={pay === "Card"} onChange={() => setPay("Card")} className="accent-[#d6b45f]" />
+                    <CreditCard size={16} className="text-gold-400" />
+                    <span className="text-sm text-sand-100">Card <span className="font-mono text-[9px] text-sand-200/40">sandbox 4242…</span></span>
+                  </label>
+                )}
+                {settings?.paymentCOD !== false && (
+                  <label className={`flex cursor-pointer items-center gap-3 rounded-xl border px-4 py-3 transition-all ${pay === "COD" ? "border-gold-400 bg-gold-400/8" : "border-forest-700 hover:border-gold-500/50"}`}>
+                    <input type="radio" name="pay" checked={pay === "COD"} onChange={() => setPay("COD")} className="accent-[#d6b45f]" />
+                    <Banknote size={16} className="text-gold-400" />
+                    <span className="text-sm text-sand-100">Cash on delivery</span>
+                  </label>
+                )}
+              </div>
             </div>
-            {customer && (
-              <label className="mt-4 flex cursor-pointer items-center gap-2.5 text-sm text-sand-200/70">
-                <input type="checkbox" checked={saveAddr} onChange={(e) => setSaveAddr(e.target.checked)} className="accent-[#d6b45f]" />
-                Save this address to my account
-              </label>
-            )}
-            <button onClick={finish} className="mt-6 w-full rounded-full bg-gold-400 py-3.5 font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-forest-950 transition-all hover:bg-gold-300">
-              Place order · ₹{subtotal.toLocaleString("en-IN")}
+
+            <div>
+              <p className="mb-2 font-mono text-[9.5px] uppercase tracking-[0.18em] text-gold-400/80">Promo code</p>
+              {applied ? (
+                <div className="flex items-center justify-between rounded-xl border border-kapha-500/45 bg-kapha-500/8 px-4 py-3">
+                  <span className="flex items-center gap-2 text-[13px] font-semibold text-kapha-300"><Check size={15} /> {applied.code} applied</span>
+                  <button onClick={() => { setApplied(null); setPromo(""); }} className="font-mono text-[9px] uppercase tracking-[0.12em] text-sand-200/50 hover:text-ember-300">Remove</button>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <input value={promo} onChange={(e) => { setPromo(e.target.value.toUpperCase()); setPromoErr(""); }} placeholder="e.g. WELCOME10" className={input} />
+                  <button onClick={applyPromo} className="shrink-0 rounded-lg border border-gold-500/60 px-4 font-mono text-[9.5px] uppercase tracking-[0.12em] text-gold-300 hover:bg-gold-400 hover:text-forest-950">Apply</button>
+                </div>
+              )}
+              {promoErr && <p className="mt-2 text-[12px] text-ember-300">{promoErr}</p>}
+            </div>
+
+            <div className="rounded-xl border border-forest-800 bg-forest-850/60 p-4">
+              <div className="space-y-2 text-[13px]">
+                <div className="flex justify-between text-sand-200/70"><span>Items total</span><span className="font-mono">₹{subtotal.toLocaleString("en-IN")}</span></div>
+                {discount > 0 && <div className="flex justify-between text-kapha-300"><span>Discount ({applied?.code})</span><span className="font-mono">− ₹{discount.toLocaleString("en-IN")}</span></div>}
+                <div className="flex justify-between text-sand-200/70"><span>Shipping</span><span className="font-mono">{shipFee === 0 ? <span className="text-kapha-300">Free</span> : `₹${shipFee.toLocaleString("en-IN")}`}</span></div>
+                <div className="mt-1 flex justify-between border-t border-forest-700 pt-2.5 text-sand-100"><span className="font-semibold">To pay</span><span className="font-display text-xl font-semibold text-gold-300">₹{grand.toLocaleString("en-IN")}</span></div>
+              </div>
+              <p className="mt-3 text-[11px] leading-relaxed text-sand-200/45">Demo checkout — no money moves. In production this step opens Razorpay (UPI, cards, net-banking).</p>
+            </div>
+
+            <button onClick={finish} disabled={processing}
+              className="flex w-full items-center justify-center gap-2 rounded-full bg-gold-400 py-3.5 font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-forest-950 transition-all hover:bg-gold-300 disabled:opacity-70">
+              {processing ? (<><RefreshCw size={14} className="animate-spin-fast" /> Processing payment…</>) : (<>Confirm & place order · ₹{grand.toLocaleString("en-IN")}</>)}
             </button>
           </div>
         )}
-        {step === 2 && (
+
+        {/* ------------------------------ STEP 3 · CONFIRMED ------------------------------ */}
+        {step === 3 && (
           <div className="flex h-full flex-col items-center justify-center text-center">
-            <span className="grid h-20 w-20 place-items-center rounded-full border-2 border-kapha-400 bg-kapha-500/15 text-kapha-300"><Check size={34} /></span>
+            <motion.span initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring", damping: 14 }}
+              className="grid h-20 w-20 place-items-center rounded-full border-2 border-kapha-400 bg-kapha-500/15 text-kapha-300"><Check size={34} /></motion.span>
             <p className="mt-6 font-display text-2xl font-semibold text-sand-100">Order {placed?.id ?? "VG-0000"}</p>
-            <p className="mt-2 max-w-xs text-sm leading-relaxed text-sand-200/60">Your formulations are being batch-checked and will ship within 48 hours. A vaidya's note travels with every parcel.</p>
+            <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.16em] text-gold-400">₹{(placed?.total ?? 0).toLocaleString("en-IN")} · {placed?.paymentMethod ?? ""}</p>
+            <p className="mt-3 max-w-xs text-sm leading-relaxed text-sand-200/60">Your formulations are being batch-checked and will ship within 48 hours. A vaidya's note travels with every parcel.</p>
             <div className="mt-8 flex flex-wrap justify-center gap-3">
-              <button onClick={() => { onDone(); navigate({ name: "account" }); }} className="rounded-full border border-gold-500/50 px-6 py-2.5 font-mono text-[10px] uppercase tracking-[0.16em] text-gold-300 hover:bg-gold-400 hover:text-forest-950">Track my order</button>
+              <button onClick={() => { onDone(); navigate({ name: "account" }); }} className="rounded-full bg-gold-400 px-6 py-2.5 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-forest-950 hover:bg-gold-300">Track my order</button>
               <button onClick={onDone} className="rounded-full border border-forest-700 px-6 py-2.5 font-mono text-[10px] uppercase tracking-[0.16em] text-sand-200/60 hover:text-sand-100">Keep browsing</button>
             </div>
           </div>

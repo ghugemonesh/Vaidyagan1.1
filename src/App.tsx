@@ -9,6 +9,7 @@ import { Account } from "./account";
 import { Contact } from "./contact";
 import { Studio } from "./studio";
 import { AdminConsole } from "./console";
+import { isMaintenanceOn, listDiscounts, saveDiscount } from "./console/db";
 
 const TITLES: Record<string, string> = {
   home: "Vaidyagan — Ayurveda, Clinically Verified",
@@ -52,11 +53,38 @@ function Shell() {
     document.title = TITLES[view.name] ?? TITLES.home;
   }, [view]);
 
+  /* seed a starter discount once so promo codes are testable without the console */
+  useEffect(() => {
+    try {
+      if (listDiscounts().length === 0) {
+        saveDiscount({ id: "d-welcome", code: "WELCOME10", type: "percent", value: 10, minOrder: 499, expires: "", active: true, createdAt: new Date().toISOString().slice(0, 10) });
+      }
+    } catch { /* seeding must never block the app */ }
+  }, []);
+
   /* the console is a full-screen app of its own — no site nav/footer around it */
   if (view.name === "console") {
     return (
       <div className="min-h-screen bg-forest-950 font-body text-sand-100">
         <AdminConsole />
+        <ToastHost />
+      </div>
+    );
+  }
+
+  /* maintenance mode — visitors see a friendly notice; the desk keeps working */
+  if (view.name !== "studio" && isMaintenanceOn()) {
+    return (
+      <div className="ops-grid relative grid min-h-screen place-items-center bg-forest-950 px-6 font-body text-sand-100">
+        <div aria-hidden className="pointer-events-none absolute inset-0" style={{ background: "radial-gradient(50% 40% at 50% 18%, rgba(214,180,95,0.10), transparent 70%)" }} />
+        <div className="relative w-full max-w-md rounded-3xl border border-forest-700 bg-forest-900/85 p-10 text-center backdrop-blur">
+          <span className="animate-breathe mx-auto grid h-16 w-16 place-items-center rounded-2xl border border-gold-500/50 bg-gold-400/10 font-display text-2xl italic text-gold-300">वै</span>
+          <p className="mt-5 font-mono text-[10px] uppercase tracking-[0.3em] text-gold-400">Vaidyagan</p>
+          <h1 className="mt-2 font-display text-3xl font-semibold">Under construction</h1>
+          <p className="mt-3 text-sm leading-relaxed text-sand-200/60">
+            We're tending the garden — the site will be back shortly. Please check again in a little while.
+          </p>
+        </div>
         <ToastHost />
       </div>
     );
