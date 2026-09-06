@@ -1032,9 +1032,9 @@ function StudioDesk(props: {
       <div className="relative mx-auto max-w-[1500px] px-5 py-7 lg:px-8">
         {/* ------------------------------- essays ------------------------------- */}
         {tab === "essays" && (
-          <div className="grid gap-6 lg:grid-cols-[300px_1fr] lg:grid-rows-[auto_1fr]">
-            {/* settings rail — top-left */}
-            <aside className="max-h-[46vh] space-y-4 overflow-y-auto rounded-xl border border-forest-800 bg-forest-900/70 p-5 lg:col-start-1 lg:row-start-1">
+          <div className={`grid gap-6 ${focus ? "" : "lg:grid-cols-[280px_1fr_300px]"}`}>
+            {/* settings rail — right side */}
+            <aside className={`max-h-[46vh] space-y-4 overflow-y-auto rounded-xl border border-forest-800 bg-forest-900/70 p-5 lg:col-start-3 lg:row-start-1 lg:max-h-[calc(100vh-215px)] ${focus ? "hidden" : ""} order-3 lg:order-none`}>
               <p className="flex items-center gap-2 font-mono text-[9.5px] uppercase tracking-[0.22em] text-gold-400"><SettingsIcon size={13} /> Article settings</p>
               <div>
                 <label className={lbl}>Content type</label>
@@ -1150,8 +1150,8 @@ function StudioDesk(props: {
               </div>
             </aside>
 
-            {/* article list — bottom-left */}
-            <aside className="flex max-h-[44vh] flex-col rounded-xl border border-forest-800 bg-forest-900/70 lg:col-start-1 lg:row-start-2 lg:min-h-0 lg:max-h-[calc(100vh-220px)]">
+            {/* article list — left side */}
+            <aside className={`flex max-h-[44vh] flex-col rounded-xl border border-forest-800 bg-forest-900/70 lg:col-start-1 lg:row-start-1 lg:min-h-0 lg:max-h-[calc(100vh-215px)] ${focus ? "hidden" : ""} order-1 lg:order-none`}>
               <div className="flex items-center justify-between gap-2 border-b border-forest-800 px-4 py-3.5">
                 <p className="font-mono text-[9.5px] uppercase tracking-[0.22em] text-gold-400">Your articles</p>
                 <button onClick={() => props.setImportOpen(true)} title="Import PDF / Word" aria-label="Import manuscript" className="grid h-8 w-8 place-items-center rounded-full border border-forest-700 text-sand-200/60 hover:border-gold-400 hover:text-gold-300"><FileUp size={13} /></button>
@@ -1192,8 +1192,8 @@ function StudioDesk(props: {
               </div>
             </aside>
 
-            {/* editor — right, spans both rows */}
-            <div className="relative flex max-h-[calc(100vh-190px)] min-h-[540px] flex-col overflow-hidden rounded-xl border border-forest-800 bg-forest-900/80 lg:col-start-2 lg:row-span-2 lg:row-start-1">
+            {/* editor — center */}
+            <div className="relative flex max-h-[calc(100vh-190px)] min-h-[540px] flex-col overflow-hidden rounded-xl border border-forest-800 bg-forest-900/80 lg:col-start-2 lg:row-start-1 order-2 lg:order-none">
               <EditorToolbar edRef={edRef} sync={sync} fmt={fmt} refreshFmt={refreshFmt} restoreSelection={restoreSelection}
                 words={words} readMin={readMin} mode={mode} setMode={setMode} device={device} setDevice={setDevice}
                 focus={focus} onToggleFocus={() => setFocus(!focus)} outlineOpen={outlineOpen} onToggleOutline={() => setOutlineOpen(!outlineOpen)}
