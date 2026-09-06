@@ -97,6 +97,7 @@ function MembersModal({ onClose }: { onClose: () => void }) {
   const [newPass, setNewPass] = useState("");
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
   const [openPerms, setOpenPerms] = useState<string | null>(null);
+  const [inviteRole, setInviteRole] = useState<"doctor" | "superadmin">("doctor");
 
   /** Grant / revoke one permission for a member (superadmin control). */
   const setPerm = (u: StudioUser, key: keyof StudioPerms, value: boolean, label: string) => {
@@ -106,13 +107,28 @@ function MembersModal({ onClose }: { onClose: () => void }) {
     refresh();
   };
 
+  /** Promote a doctor to superadmin — or demote back (guards enforced in auth). */
+  const changeRole = (u: StudioUser, role: "superadmin" | "doctor") => {
+    if (u.role === role) return;
+    const res = auth.setRole(u.id, role);
+    if (!res.ok) { toast(res.error ?? "Could not change the role"); return; }
+    logActivity("member", role === "superadmin" ? `promoted ${u.name} to superadmin` : `moved ${u.name} to doctor`);
+    toast(role === "superadmin" ? `${u.name} is now a superadmin — full desk control` : `${u.name} is now a doctor`);
+    refresh();
+  };
+
   const add = () => {
     if (!form.name.trim() || !form.username.trim() || form.password.length < 4) { toast("Name, username and a 4+ character password are required"); return; }
-    const res = auth.addMember({ name: form.name.trim(), username: form.username, password: form.password, specialty: form.specialty.trim() || "Ayurvedic medicine", role: "doctor" });
+    const res = auth.addMember({
+      name: form.name.trim(), username: form.username, password: form.password,
+      specialty: form.specialty.trim() || "Ayurvedic medicine", role: inviteRole,
+      ...(inviteRole === "superadmin" ? { consoleAccess: true, storeAccess: true } : {}),
+    });
     if (!res.ok) { toast(res.error ?? "Could not add member"); return; }
-    logActivity("member", `added ${res.user!.name} to the desk`);
+    logActivity("member", `added ${res.user!.name} to the desk as ${inviteRole === "superadmin" ? "superadmin" : "doctor"}`);
     setForm({ name: "", username: "", password: "", specialty: "" });
-    toast(`${res.user!.name} can now sign in`);
+    setInviteRole("doctor");
+    toast(`${res.user!.name} can now sign in${inviteRole === "superadmin" ? " with full superadmin rights" : ""}`);
     refresh();
   };
 
@@ -141,7 +157,12 @@ function MembersModal({ onClose }: { onClose: () => void }) {
               <div className="min-w-0 flex-1">
                 <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-sand-100">
                   {u.name}
-                  {u.id === "root" && <span className="rounded-full bg-gold-400/15 px-2 py-0.5 font-mono text-[8px] uppercase tracking-[0.12em] text-gold-300">Superadmin</span>}
+                  {u.role === "superadmin" && (
+                    <span className="flex items-center gap-1 rounded-full bg-gold-400/15 px-2 py-0.5 font-mono text-[8px] uppercase tracking-[0.12em] text-gold-300">
+                      <ShieldCheck size={9} /> Superadmin
+                    </span>
+                  )}
+                  {u.role === "doctor" && <span className="rounded-full bg-forest-800 px-2 py-0.5 font-mono text-[8px] uppercase tracking-[0.12em] text-sand-200/55">Doctor</span>}
                   {!u.active && <span className="rounded-full bg-forest-800 px-2 py-0.5 font-mono text-[8px] uppercase tracking-[0.12em] text-sand-200/50">Suspended</span>}
                 </p>
                 <p className="font-mono text-[9.5px] uppercase tracking-[0.12em] text-sand-200/40">@{u.username} · {u.specialty}</p>
@@ -185,8 +206,35 @@ function MembersModal({ onClose }: { onClose: () => void }) {
             {showPerms && (
               <div className="mt-3 space-y-2 border-t border-forest-800 pt-3">
                 <p className="font-mono text-[8.5px] uppercase tracking-[0.22em] text-gold-400/80">
-                  Permissions — changes apply instantly{u.id === "root" ? " · founder always keeps everything" : ""}
+                  Role & permissions — changes apply instantly{u.id === "root" ? " · founder always keeps everything" : ""}
                 </p>
+
+                {/* desk role — promote to superadmin / demote to doctor */}
+                <div className="rounded-xl border border-forest-800 bg-forest-950/40 p-3.5">
+                  <p className="font-mono text-[8.5px] uppercase tracking-[0.16em] text-sand-200/50">Desk role</p>
+                  {isRoot ? (
+                    <p className="mt-2 flex items-center gap-2 text-[12.5px] text-gold-300"><ShieldCheck size={14} /> Founder account — always a superadmin.</p>
+                  ) : (
+                    <div className="mt-2 flex gap-2">
+                      {(["doctor", "superadmin"] as const).map((r) => (
+                        <button key={r} onClick={() => changeRole(u, r)} aria-pressed={u.role === r}
+                          className={`flex-1 rounded-lg border py-2.5 font-mono text-[9px] uppercase tracking-[0.12em] transition-all ${
+                            u.role === r
+                              ? r === "superadmin"
+                                ? "border-gold-400 bg-gold-400/12 text-gold-300 shadow-[0_0_16px_rgba(214,180,95,0.2)]"
+                                : "border-moss-400 bg-moss-500/12 text-moss-300"
+                              : "border-forest-700 text-sand-200/50 hover:border-forest-600 hover:text-sand-100"
+                          }`}>
+                          {r === "superadmin" ? "★ Superadmin" : "Doctor"}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <p className="mt-2 text-[11px] leading-snug text-sand-200/40">
+                    Superadmins manage members, approve posts, and control the Admin Console & master switches. Doctors write and publish content.
+                  </p>
+                </div>
+
                 <div className="grid gap-2 sm:grid-cols-2">
                   <PermSwitch on={u.canPublishDirect} disabled={isRoot} label="Publish directly" desc="Off → posts go to the Needs Review queue." onToggle={(b) => setPerm(u, "canPublishDirect", b, "Publish directly")} />
                   <PermSwitch on={u.canEditPublished} disabled={isRoot} label="Edit own published posts" desc="Off → their live articles are locked." onToggle={(b) => setPerm(u, "canEditPublished", b, "Edit published")} />
@@ -203,14 +251,35 @@ function MembersModal({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="mt-6 rounded-xl border border-gold-500/35 bg-gold-400/5 p-5">
-          <p className="font-mono text-[9.5px] uppercase tracking-[0.22em] text-gold-300">Add a doctor to the desk</p>
-          <div className="mt-3.5 grid gap-3 sm:grid-cols-2">
+          <p className="font-mono text-[9.5px] uppercase tracking-[0.22em] text-gold-300">Add someone to the desk</p>
+          <div className="mt-3 flex gap-2">
+            {(["doctor", "superadmin"] as const).map((r) => (
+              <button key={r} onClick={() => setInviteRole(r)} aria-pressed={inviteRole === r}
+                className={`flex-1 rounded-lg border py-2.5 font-mono text-[9px] uppercase tracking-[0.12em] transition-all sm:flex-none sm:px-6 ${
+                  inviteRole === r
+                    ? r === "superadmin"
+                      ? "border-gold-400 bg-gold-400/12 text-gold-300"
+                      : "border-moss-400 bg-moss-500/12 text-moss-300"
+                    : "border-forest-700 text-sand-200/50 hover:text-sand-100"
+                }`}>
+                {r === "superadmin" ? "Invite as Superadmin" : "Invite as Doctor"}
+              </button>
+            ))}
+          </div>
+          {inviteRole === "superadmin" && (
+            <p className="mt-2 flex items-start gap-2 text-[11px] leading-snug text-gold-300/75">
+              <ShieldCheck size={13} className="mt-0.5 shrink-0" /> Superadmins can manage members, approve posts, and open the Admin Console. Grant this only to people you fully trust.
+            </p>
+          )}
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
             <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Full name" className={inp} />
             <input value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} placeholder="Username (for login)" className={inp} />
             <input value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="Temporary password" className={inp} />
             <input value={form.specialty} onChange={(e) => setForm({ ...form, specialty: e.target.value })} placeholder="Specialty" className={inp} />
           </div>
-          <button onClick={add} className="gold-sheen mt-3.5 flex items-center gap-2 rounded-full bg-gold-400 px-6 py-2.5 font-mono text-[9.5px] font-semibold uppercase tracking-[0.16em] text-forest-950 hover:bg-gold-300"><Plus size={14} /> Add member</button>
+          <button onClick={add} className="gold-sheen mt-3.5 flex items-center gap-2 rounded-full bg-gold-400 px-6 py-2.5 font-mono text-[9.5px] font-semibold uppercase tracking-[0.16em] text-forest-950 hover:bg-gold-300">
+            <Plus size={14} /> Add {inviteRole === "superadmin" ? "superadmin" : "member"}
+          </button>
         </div>
       </motion.div>
     </motion.div>

@@ -16,7 +16,7 @@ import {
   type Discount, type ConsoleSettings, type ConsoleNotification, type PageView, type CustomerRecord,
 } from "./db";
 import {
-  ARTICLES, PRODUCTS, SEED_ORDERS,
+  ARTICLES, ORDER_META, PRODUCTS, SEED_ORDERS,
   type Article, type Herb, type Order, type OrderStatus, type Product,
 } from "../data";
 import { auth, type StudioUser } from "../lib";
@@ -115,8 +115,31 @@ export async function logActivityLive(actor: string, kind: string, action: strin
 
 /* ================================== orders ================================== */
 
+/** Self-healing loader: legacy or partial records are normalized instead of
+ *  crashing the Orders page (unknown status → "new", missing customer → stub). */
 function demoOrders(): Order[] {
-  return readJson<Order[]>(SITE_KEYS.orders, SEED_ORDERS);
+  const raw = readJson<Order[]>(SITE_KEYS.orders, SEED_ORDERS);
+  if (!Array.isArray(raw)) return SEED_ORDERS;
+  return raw
+    .filter((o) => o && typeof o === "object")
+    .map((o) => ({
+      ...o,
+      id: o.id || `VG-${Math.floor(1000 + Math.random() * 9000)}`,
+      status: (ORDER_META as Record<string, unknown>)[o.status as string] ? o.status : ("new" as OrderStatus),
+      customer:
+        o.customer && typeof o.customer.name === "string"
+          ? {
+              name: o.customer.name,
+              phone: o.customer.phone ?? "",
+              address: o.customer.address ?? "",
+              city: o.customer.city ?? "",
+              pin: o.customer.pin ?? "",
+            }
+          : { name: "Unknown customer", phone: "", address: "", city: "", pin: "" },
+      items: Array.isArray(o.items) ? o.items : [],
+      total: typeof o.total === "number" && Number.isFinite(o.total) ? o.total : 0,
+      placedAt: typeof o.placedAt === "string" ? o.placedAt : new Date().toISOString(),
+    }));
 }
 
 export async function loadOrders(): Promise<Order[]> {

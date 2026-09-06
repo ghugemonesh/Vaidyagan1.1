@@ -90,7 +90,8 @@ export function StatCard({ label, value, sub, icon, tone, delay = 0 }: {
 /* -------------------------------- status badge ------------------------------ */
 
 export function StatusBadge({ status }: { status: OrderStatus }) {
-  const m = ORDER_META[status];
+  /* unknown/legacy statuses must never crash the console */
+  const m = ORDER_META[status] ?? { label: String(status || "unknown"), color: "#93b1cf", cls: "" };
   return (
     <span className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-[8.5px] uppercase tracking-[0.12em]"
       style={{ borderColor: `${m.color}55`, color: m.color, background: `${m.color}12` }}>
