@@ -4,10 +4,10 @@ import {
   PenLine, Eye, Plus, Trash2, Send, BookOpen, Download, Lock, Users, Key, Check,
   X, List, Image as ImageIcon, Bold, Italic, Underline, Strikethrough,
   LayoutGrid, ShoppingCart, Shield, Settings as SettingsIcon, User as UserIcon, Leaf,
-  ListTree, Youtube, Maximize2, Minimize2, FileUp, CalendarDays, ShieldCheck,
+  ListTree, Youtube, Maximize2, Minimize2, FileUp, CalendarDays, ShieldCheck, FileText, BarChart3,
 } from "lucide-react";
 import { useApp, auth, readImageFile, SmartImg, Monogram, type StudioUser, type StudioPerms } from "./lib";
-import { CATEGORIES, IMG, KIND_META, articleHtml, authorFor, formatDate, type Article, type Kind } from "./data";
+import { CATEGORIES, IMG, KIND_META, articleHtml, authorFor, formatDate, type Article, type CaseMeta, type Kind, type ResearchMeta } from "./data";
 import { DoctorProfileTab, blankProfile, profileFor } from "./doctor-profile";
 import { HerbManager } from "./herbs-admin";
 
@@ -706,6 +706,8 @@ export function Studio() {
   const [doshas, setDoshas] = useState<Article["doshas"]>(["vata"]);
   const [symptoms, setSymptoms] = useState("");
   const [kind, setKind] = useState<Kind>("blog");
+  const [caseMeta, setCaseMeta] = useState<CaseMeta>({ age: "", sex: "", prakriti: "", presenting: "", duration: "" });
+  const [researchMeta, setResearchMeta] = useState<ResearchMeta>({ question: "", design: "", n: "", finding: "", grade: "" });
   const [mode, setMode] = useState<"write" | "preview">("write");
   const edRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -769,6 +771,8 @@ export function Studio() {
     setDoshas(selected.doshas);
     setSymptoms(selected.symptoms.join(", "));
     setKind(selected.kind);
+    setCaseMeta(selected.caseMeta ?? { age: "", sex: "", prakriti: "", presenting: "", duration: "" });
+    setResearchMeta(selected.researchMeta ?? { question: "", design: "", n: "", finding: "", grade: "" });
     setCover(selected.cover ?? "");
     setPdfAttachment(selected.pdfUrl ? { name: selected.pdfName ?? "Original document.pdf", dataUrl: selected.pdfUrl } : null);
     setScheduleDate(selected.status === "scheduled" ? selected.date : "");
@@ -793,7 +797,8 @@ export function Studio() {
     views: selected?.views ?? 0, kind, blocks: [], html, status,
     pdfUrl: pdfAttachment?.dataUrl ?? selected?.pdfUrl,
     pdfName: pdfAttachment?.name ?? selected?.pdfName,
-    caseMeta: selected?.caseMeta, researchMeta: selected?.researchMeta,
+    caseMeta: kind === "case" ? caseMeta : undefined,
+    researchMeta: kind === "research" ? researchMeta : undefined,
   });
 
   const onSave = () => {
@@ -1165,6 +1170,33 @@ export function Studio() {
                   ))}
                 </div>
               </div>
+
+              {/* structured fields switch with the content type */}
+              {kind === "case" && (
+                <div className="animate-rise rounded-lg border border-ember-500/35 bg-ember-500/6 p-3.5">
+                  <p className="mb-2.5 flex items-center gap-1.5 font-mono text-[8.5px] uppercase tracking-[0.16em] text-ember-300"><FileText size={12} /> Case details</p>
+                  {([["age", "Age"], ["sex", "Sex"], ["prakriti", "Prakriti"], ["presenting", "Presenting complaint"], ["duration", "Duration"]] as [keyof CaseMeta, string][]).map(([k, label]) => (
+                    <div key={k} className="mb-2 last:mb-0">
+                      <label className="mb-1 block font-mono text-[7.5px] uppercase tracking-[0.14em] text-sand-200/40">{label}</label>
+                      <input value={caseMeta[k]} onChange={(e) => setCaseMeta({ ...caseMeta, [k]: e.target.value })} placeholder={k === "presenting" ? "e.g. chronic insomnia, 6 months" : ""}
+                        className="w-full rounded-md border border-forest-700 bg-forest-950/60 px-2.5 py-2 text-[12px] text-sand-100 placeholder:text-sand-200/25 focus:border-gold-400 focus:outline-none" />
+                    </div>
+                  ))}
+                </div>
+              )}
+              {kind === "research" && (
+                <div className="animate-rise rounded-lg border border-steel-400/35 bg-steel-400/6 p-3.5">
+                  <p className="mb-2.5 flex items-center gap-1.5 font-mono text-[8.5px] uppercase tracking-[0.16em] text-steel-300"><BarChart3 size={12} /> Review details</p>
+                  {([["question", "Research question"], ["design", "Study design"], ["n", "Sample size (n)"], ["finding", "Key finding"], ["grade", "Evidence grade"]] as [keyof ResearchMeta, string][]).map(([k, label]) => (
+                    <div key={k} className="mb-2 last:mb-0">
+                      <label className="mb-1 block font-mono text-[7.5px] uppercase tracking-[0.14em] text-sand-200/40">{label}</label>
+                      <input value={researchMeta[k]} onChange={(e) => setResearchMeta({ ...researchMeta, [k]: e.target.value })} placeholder={k === "question" ? "e.g. Does Brahmi improve working memory?" : k === "design" ? "e.g. RCT, double-blind" : ""}
+                        className="w-full rounded-md border border-forest-700 bg-forest-950/60 px-2.5 py-2 text-[12px] text-sand-100 placeholder:text-sand-200/25 focus:border-gold-400 focus:outline-none" />
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <div>
                 <label className="mb-1.5 block font-mono text-[8.5px] uppercase tracking-[0.16em] text-sand-200/45">Summary</label>
                 <textarea value={summary} onChange={(e) => setSummary(e.target.value)} rows={3} placeholder="A two-sentence summary for cards…" className="w-full rounded-lg border border-forest-700 bg-forest-950/60 px-3 py-2.5 text-[13px] text-sand-100 placeholder:text-sand-200/25 focus:border-gold-400 focus:outline-none" />

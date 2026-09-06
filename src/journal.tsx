@@ -218,6 +218,46 @@ export function Reader({ id }: { id: string }) {
               </div>
             </div>
           </Reveal>
+
+          {/* structured case / review details */}
+          {article.caseMeta && (
+            <Reveal delay={160}>
+              <div className="mt-8 rounded-2xl border border-ember-500/30 bg-ember-500/5 p-5">
+                <p className="font-mono text-[9px] uppercase tracking-[0.22em] text-ember-300">Case presentation</p>
+                <div className="mt-3.5 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
+                  {([["Age", article.caseMeta.age], ["Sex", article.caseMeta.sex], ["Prakriti", article.caseMeta.prakriti], ["Duration", article.caseMeta.duration]] as [string, string][])
+                    .filter(([, v]) => v)
+                    .map(([k, v]) => (
+                      <div key={k}><p className="font-mono text-[8px] uppercase tracking-[0.16em] text-sand-200/40">{k}</p><p className="mt-1 text-[13.5px] font-medium text-sand-100">{v}</p></div>
+                    ))}
+                </div>
+                {article.caseMeta.presenting && (
+                  <div className="mt-3.5"><p className="font-mono text-[8px] uppercase tracking-[0.16em] text-sand-200/40">Presenting complaint</p><p className="mt-1 text-[13.5px] leading-relaxed text-sand-100">{article.caseMeta.presenting}</p></div>
+                )}
+              </div>
+            </Reveal>
+          )}
+          {article.researchMeta && (
+            <Reveal delay={160}>
+              <div className="mt-8 rounded-2xl border border-steel-400/30 bg-steel-400/5 p-5">
+                <p className="font-mono text-[9px] uppercase tracking-[0.22em] text-steel-300">Review at a glance</p>
+                <div className="mt-3.5 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
+                  {([["Design", article.researchMeta.design], ["Sample size", article.researchMeta.n], ["Evidence grade", article.researchMeta.grade]] as [string, string][])
+                    .filter(([, v]) => v)
+                    .map(([k, v]) => (
+                      <div key={k}><p className="font-mono text-[8px] uppercase tracking-[0.16em] text-sand-200/40">{k}</p><p className="mt-1 text-[13.5px] font-medium text-sand-100">{v}</p></div>
+                    ))}
+                </div>
+                {article.researchMeta.question && (
+                  <div className="mt-3.5"><p className="font-mono text-[8px] uppercase tracking-[0.16em] text-sand-200/40">Research question</p><p className="mt-1 font-display text-[15px] italic leading-relaxed text-sand-100">{article.researchMeta.question}</p></div>
+                )}
+                {article.researchMeta.finding && (
+                  <div className="mt-3.5"><p className="font-mono text-[8px] uppercase tracking-[0.16em] text-sand-200/40">Key finding</p><p className="mt-1 text-[13.5px] leading-relaxed text-sand-100">{article.researchMeta.finding}</p></div>
+                )}
+              </div>
+            </Reveal>
+          )}
+
           <Reveal delay={200}>
             {article.pdfUrl && (
               <div className="mt-9 overflow-hidden rounded-xl border border-gold-500/35">

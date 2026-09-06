@@ -16,7 +16,7 @@ import {
   type Discount, type ConsoleSettings, type ConsoleNotification, type PageView, type CustomerRecord,
 } from "./db";
 import {
-  ARTICLES, PRODUCTS,
+  ARTICLES, PRODUCTS, SEED_ORDERS,
   type Article, type Herb, type Order, type OrderStatus, type Product,
 } from "../data";
 import { auth, type StudioUser } from "../lib";
@@ -116,7 +116,7 @@ export async function logActivityLive(actor: string, kind: string, action: strin
 /* ================================== orders ================================== */
 
 function demoOrders(): Order[] {
-  return readJson<Order[]>(SITE_KEYS.orders, []);
+  return readJson<Order[]>(SITE_KEYS.orders, SEED_ORDERS);
 }
 
 export async function loadOrders(): Promise<Order[]> {

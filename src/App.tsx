@@ -47,11 +47,25 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
 }
 
 function Shell() {
-  const { view } = useApp();
+  const { view, allArticles, products } = useApp();
 
+  /* per-view titles + meta description for SEO */
   useEffect(() => {
-    document.title = TITLES[view.name] ?? TITLES.home;
-  }, [view]);
+    let title = TITLES[view.name] ?? TITLES.home;
+    let desc = "Vaidyagan — clinically verified Ayurveda. Classical protocols and herb monographs by registered BAMS vaidyas.";
+    if (view.name === "article") {
+      const a = allArticles.find((x) => x.id === view.id);
+      if (a) { title = `${a.title} — Vaidyagan`; desc = a.summary || desc; }
+    } else if (view.name === "product") {
+      const p = products.find((x) => x.id === view.id);
+      if (p) { title = `${p.name} — Vaidyagan Store`; desc = p.desc || desc; }
+    }
+    document.title = title;
+    try {
+      const el = document.querySelector('meta[name="description"]');
+      if (el) el.setAttribute("content", desc);
+    } catch { /* ignore */ }
+  }, [view, allArticles, products]);
 
   /* seed a starter discount once so promo codes are testable without the console */
   useEffect(() => {
