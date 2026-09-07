@@ -103,7 +103,15 @@ function LoginScreen({ onLogin }: { onLogin: (u: StudioUser) => void }) {
 
 /* ------------------------------ shared fragments ----------------------------- */
 
-function PermSwitch({ on, onToggle, label, desc, disabled }: { on: boolean; onToggle: (b: boolean) => void; label: string; desc: string; disabled?: boolean }) {
+function PermSwitch({ on, onToggle, label, desc, disabled, compact }: { on: boolean; onToggle: (b: boolean) => void; label: string; desc: string; disabled?: boolean; compact?: boolean }) {
+  if (compact) {
+    return (
+      <button role="switch" aria-checked={on} disabled={disabled} onClick={() => onToggle(!on)}
+        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${disabled ? "cursor-not-allowed opacity-45" : ""} ${on ? "bg-kapha-500" : "bg-forest-700"}`}>
+        <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-sand-100 shadow transition-all ${on ? "left-[22px]" : "left-0.5"}`} />
+      </button>
+    );
+  }
   return (
     <button role="switch" aria-checked={on} disabled={disabled} onClick={() => onToggle(!on)}
       className={`flex w-full items-center justify-between gap-3 rounded-xl border p-3 text-left transition-all ${disabled ? "cursor-not-allowed opacity-45" : ""} ${on ? "border-kapha-500/50 bg-kapha-500/8" : "border-forest-700 bg-forest-950/40"}`}>
@@ -1281,10 +1289,15 @@ function StudioDesk(props: {
                   </div>
                 </button>
                 <div className="flex items-center justify-between border-t border-forest-800 px-4 py-2.5">
-                  <PermSwitch on={a.status === "published"} label="" desc="" onToggle={(b) => {
-                    if (b) { publishArticle({ ...a, status: "published" }); logActivity("publish", `published "${a.title}"`, a.title); toast("Live on the journal"); }
-                    else { saveDraft({ ...a, status: "draft" }); toast("Hidden from the journal"); }
-                  }} />
+                  <div className="flex items-center gap-2">
+                    <PermSwitch compact on={a.status === "published"} label="" desc="" onToggle={(b) => {
+                      if (b) { publishArticle({ ...a, status: "published" }); logActivity("publish", `published "${a.title}"`, a.title); toast("Live on the journal"); }
+                      else { saveDraft({ ...a, status: "draft" }); toast("Hidden from the journal"); }
+                    }} />
+                    <span className={`font-mono text-[9px] uppercase tracking-[0.1em] ${a.status === "published" ? "text-kapha-300" : "text-sand-200/40"}`}>
+                      {a.status === "published" ? "Live" : "Hidden"}
+                    </span>
+                  </div>
                   {armedDelete === a.id ? (
                     <button onClick={() => onDelete(a.id)} title="Click again to confirm" aria-label={`Confirm delete ${a.title || "untitled"}`}
                       className="animate-rise flex h-8 items-center gap-1 rounded-md bg-ember-400 px-2.5 font-mono text-[8.5px] font-bold uppercase tracking-[0.08em] text-forest-950 shadow-[0_4px_14px_rgba(201,100,48,0.45)]"><Trash2 size={12} /> Sure?</button>

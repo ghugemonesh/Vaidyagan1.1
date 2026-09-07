@@ -80,7 +80,7 @@ function DoshaWheel({ onPick, onCore }: { onPick: (d: Dosha) => void; onCore: ()
           const dimmed = hovered !== null && !isHover;
           return (
             <div key={r.dosha} ref={(el) => { ringRefs.current[i] = el; }}
-              className="absolute left-1/2 top-1/2 rounded-full"
+              className="absolute left-1/2 top-1/2 rounded-full pointer-events-none"
               style={{ width: `${r.pct}%`, aspectRatio: "1", marginLeft: `${-r.pct / 2}%`, marginTop: `${-r.pct / 2}%`, transformStyle: "preserve-3d" }}>
               <span aria-hidden className="absolute inset-0 rounded-full border border-dashed transition-all duration-500"
                 style={{ borderColor: isHover ? `${m.color}70` : `${m.color}24`, boxShadow: isHover ? `0 0 70px -18px ${m.color}99, inset 0 0 40px -24px ${m.color}55` : "none" }} />
@@ -93,7 +93,7 @@ function DoshaWheel({ onPick, onCore }: { onPick: (d: Dosha) => void; onCore: ()
                 <div ref={(el) => { nodeRefs.current[i] = el; }} className={`transition-all duration-500 ${dimmed ? "opacity-40 saturate-50" : "opacity-100"}`}>
                   <button onClick={() => onPick(r.dosha)} onMouseEnter={() => setHovered(r.dosha)} onMouseLeave={() => setHovered(null)}
                     onFocus={() => setHovered(r.dosha)} onBlur={() => setHovered(null)}
-                    aria-label={`Explore ${m.name} — ${m.elements}`} className="group relative grid place-items-center">
+                    aria-label={`Explore ${m.name} — ${m.elements}`} className="group relative grid place-items-center pointer-events-auto">
                     <span aria-hidden className="absolute -inset-7 rounded-full blur-2xl transition-opacity duration-500"
                       style={{ background: `radial-gradient(circle, ${m.color}66 0%, transparent 70%)`, opacity: isHover ? 1 : 0 }} />
                     <span className="relative grid h-16 w-16 place-items-center rounded-full border-2 backdrop-blur-sm transition-all duration-500 group-hover:scale-110 sm:h-[78px] sm:w-[78px]"
