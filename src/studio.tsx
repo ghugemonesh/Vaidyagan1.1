@@ -276,6 +276,7 @@ function MembersModal({ onClose }: { onClose: () => void }) {
                       <PermSwitch on={u.storeAccess} disabled={isRoot} label="Store tab in Studio" desc="Products & orders at a glance." onToggle={(b) => setPerm(u, "storeAccess", b, "Store access")} />
                       <PermSwitch on={u.herbAccess} disabled={isRoot} label="Herb Index tab" desc="Add & edit public herb monographs." onToggle={(b) => setPerm(u, "herbAccess", b, "Herb Index access")} />
                       <PermSwitch on={u.consoleAccess} disabled={isRoot} label="Admin Console access" desc="The full Wix/Shopify-style dashboard." onToggle={(b) => setPerm(u, "consoleAccess", b, "Admin Console access")} />
+                      <PermSwitch on={u.showInFooter} disabled={isRoot} label="Show in website footer" desc="Display this doctor in the footer section." onToggle={(b) => setPerm(u, "showInFooter", b, "Show in footer")} />
                     </div>
                   </div>
                 )}

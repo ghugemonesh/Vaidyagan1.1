@@ -50,6 +50,7 @@ export interface StudioPerms {
   herbAccess: boolean;
   consoleAccess: boolean;
   consoleRole: "editor" | "viewer";
+  showInFooter: boolean;
 }
 export interface StudioUser extends StudioPerms {
   id: string; name: string; role: "superadmin" | "doctor";
@@ -58,6 +59,7 @@ export interface StudioUser extends StudioPerms {
 export const DEFAULT_PERMS: StudioPerms = {
   canPublishDirect: false, canEditPublished: true, canDeletePublished: false,
   storeAccess: false, herbAccess: true, consoleAccess: false, consoleRole: "viewer",
+  showInFooter: true,
 };
 function normalizeUser(u: StudioUser): StudioUser { return { ...DEFAULT_PERMS, ...u }; }
 

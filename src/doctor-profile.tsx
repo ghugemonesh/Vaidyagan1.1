@@ -6,7 +6,7 @@
    ========================================================================== */
 
 import React, { useEffect, useRef, useState } from "react";
-import { useApp, readImageFile, SmartImg, type StudioUser } from "./lib";
+import { useApp, readImageFile, SmartImg, auth, type StudioUser } from "./lib";
 import { Check, Close, Pen, Upload, Camera, Help, Plus, Trash, Leaf, Lock } from "./icons";
 
 export type Day = "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun";
@@ -71,10 +71,19 @@ export function profileFor(userId: string): DoctorProfile | null {
   } catch { return null; }
 }
 
-/** Public visibility — used by the home Doctor's Corner. */
+/** Public visibility — used by the home Doctor's Corner and footer. */
 export function isDoctorListed(userId: string): boolean {
   const p = profileFor(userId);
-  return p ? p.listed : true;
+  // Check profile listing first
+  if (p && !p.listed) return false;
+  // Check Studio permission for footer visibility
+  try {
+    const user = auth.get(userId);
+    if (user && user.showInFooter === false) return false;
+  } catch {
+    // If auth not available, default to showing
+  }
+  return true;
 }
 
 function saveProfile(p: DoctorProfile) {
