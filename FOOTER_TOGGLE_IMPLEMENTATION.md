@@ -44,6 +44,19 @@ Both must be true for the doctor to appear in the footer.
 - Existing members will get this permission via the `normalizeUser` function
 - The root/founder account cannot have this permission toggled off
 
+## Bug Fix Applied
+
+**Issue:** The toggle was not working because of an ID mismatch:
+- The `AUTHORS` array in `data.ts` uses ID `"monesh"` for Dr. Monesh L Ghuge
+- The auth system in `lib.tsx` uses ID `"root"` with username `"monesh"`
+- When the footer checked `isDoctorListed("monesh")`, it couldn't find a matching user
+
+**Solution:** Updated `isDoctorListed` to check both user ID and username:
+```typescript
+const user = users.find((u) => u.id === userId || u.username === userId);
+```
+This allows the function to find users whether they're referenced by their ID or username.
+
 ## Testing Checklist
 - [x] Build passes without errors
 - [x] Permission toggle appears in Members panel
@@ -52,6 +65,7 @@ Both must be true for the doctor to appear in the footer.
 - [x] Toggling on adds doctor back to footer
 - [x] Activity log records the change
 - [x] Toast notification confirms the action
+- [x] ID mismatch bug fixed (monesh/root mapping works)
 
 ## Files Modified
 1. `src/lib.tsx` - Added permission field and default value

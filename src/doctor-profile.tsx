@@ -81,8 +81,9 @@ export function isDoctorListed(userId: string): boolean {
   try {
     const raw = localStorage.getItem("vaidyagan_studio_users_v1");
     if (raw) {
-      const users = JSON.parse(raw) as Array<{ id: string; showInFooter?: boolean }>;
-      const user = users.find((u) => u.id === userId);
+      const users = JSON.parse(raw) as Array<{ id: string; username?: string; showInFooter?: boolean }>;
+      // Try to find user by ID first, then by username (handles "monesh" -> "root" mapping)
+      const user = users.find((u) => u.id === userId || u.username === userId);
       // If user exists and showInFooter is explicitly false, hide them
       if (user && user.showInFooter === false) return false;
     }
