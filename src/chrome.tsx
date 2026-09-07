@@ -235,6 +235,11 @@ function CheckoutFlow({ subtotal, lines, onDone }: { subtotal: number; lines: Ca
     toast(`Demo OTP: ${code}`);
   };
   const verifyOtp = () => {
+    // Validate OTP format
+    if (!/^\d{4}$/.test(otpInput)) {
+      setAuthErr("OTP must be exactly 4 digits");
+      return;
+    }
     if (otpInput !== otpCode) { setAuthErr("That code doesn't match — try again"); return; }
     loginOtp(phone);
     setStep(1);
@@ -242,16 +247,29 @@ function CheckoutFlow({ subtotal, lines, onDone }: { subtotal: number; lines: Ca
 
   const finish = () => {
     if (processing || !customer) return;
+
+    // Validate delivery form
+    if (!form.name.trim()) { setAuthErr("Please enter your name"); return; }
+    if (!form.phone.trim() || !/^\+?[\d\s-]{10,}$/.test(form.phone)) { setAuthErr("Please enter a valid phone number"); return; }
+    if (!form.address.trim()) { setAuthErr("Please enter your address"); return; }
+    if (!form.city.trim()) { setAuthErr("Please enter your city"); return; }
+    if (!form.pin.trim() || !/^\d{6}$/.test(form.pin)) { setAuthErr("Please enter a valid 6-digit PIN code"); return; }
+
     setProcessing(true);
     window.setTimeout(() => {
-      const order = placeOrder(form, pay, { discountCode: applied?.code, discountAmount: discount || undefined, shippingFee: shipFee || undefined });
-      if (saveAddr && form.address.trim()) {
-        saveAddress({ id: `addr-${Date.now()}`, label: "Home", name: form.name, phone: form.phone, line1: form.address, city: form.city, state: "", pin: form.pin, isDefault: (customer.addresses ?? []).length === 0 });
+      try {
+        const order = placeOrder(form, pay, { discountCode: applied?.code, discountAmount: discount || undefined, shippingFee: shipFee || undefined });
+        if (saveAddr && form.address.trim()) {
+          saveAddress({ id: `addr-${Date.now()}`, label: "Home", name: form.name, phone: form.phone, line1: form.address, city: form.city, state: "", pin: form.pin, isDefault: (customer.addresses ?? []).length === 0 });
+        }
+        setPlaced(order);
+        setStep(3);
+        setProcessing(false);
+        toast(`Order ${order.id} placed — the desk has been notified`);
+      } catch (error) {
+        setProcessing(false);
+        setAuthErr(error instanceof Error ? error.message : "Failed to place order. Please try again.");
       }
-      setPlaced(order);
-      setStep(3);
-      setProcessing(false);
-      toast(`Order ${order.id} placed — the desk has been notified`);
     }, 1100);
   };
 
@@ -370,6 +388,7 @@ function CheckoutFlow({ subtotal, lines, onDone }: { subtotal: number; lines: Ca
               className="flex w-full items-center justify-center gap-2 rounded-full bg-gold-400 py-3.5 font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-forest-950 transition-all hover:bg-gold-300 disabled:opacity-35">
               Continue to payment <ArrowRight size={14} />
             </button>
+            {authErr && <p className="rounded-lg border border-ember-500/40 bg-ember-500/8 px-4 py-2.5 text-[12px] text-ember-300">{authErr}</p>}
           </div>
         )}
 

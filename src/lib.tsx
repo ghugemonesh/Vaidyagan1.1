@@ -4,6 +4,35 @@ import {
   type Article, type Dosha, type Herb, type Order, type OrderCustomer, type OrderStatus, type Product,
 } from "./data";
 
+// Input sanitization utilities
+export function sanitizeHtml(html: string): string {
+  // Remove script tags and event handlers
+  return html
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/on\w+="[^"]*"/gi, '')
+    .replace(/on\w+='[^']*'/gi, '')
+    .replace(/javascript:/gi, '');
+}
+
+export function sanitizeText(text: string): string {
+  // Remove HTML tags and trim
+  return text.replace(/<[^>]*>/g, '').trim();
+}
+
+export function validateEmail(email: string): boolean {
+  const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return re.test(email);
+}
+
+export function validatePhone(phone: string): boolean {
+  const cleaned = phone.replace(/\D/g, '');
+  return cleaned.length >= 10 && cleaned.length <= 15;
+}
+
+export function validatePinCode(pin: string): boolean {
+  return /^\d{6}$/.test(pin);
+}
+
 /* ----------------------------------- views ---------------------------------- */
 
 export type View =
@@ -34,6 +63,49 @@ function normalizeUser(u: StudioUser): StudioUser { return { ...DEFAULT_PERMS, .
 
 const USERS_KEY = "vaidyagan_studio_users_v1";
 const SESSION_KEY = "vaidyagan_studio_session_v1";
+const LOGIN_ATTEMPTS_KEY = "vaidyagan_login_attempts_v1";
+const MAX_LOGIN_ATTEMPTS = 5;
+const LOGIN_LOCKOUT_DURATION = 15 * 60 * 1000; // 15 minutes
+
+interface LoginAttempt {
+  count: number;
+  lastAttempt: number;
+  lockedUntil?: number;
+}
+
+function getLoginAttempts(): LoginAttempt {
+  try {
+    const raw = localStorage.getItem(LOGIN_ATTEMPTS_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch { /* ignore */ }
+  return { count: 0, lastAttempt: 0 };
+}
+
+function recordLoginAttempt(success: boolean) {
+  const attempts = getLoginAttempts();
+  if (success) {
+    localStorage.removeItem(LOGIN_ATTEMPTS_KEY);
+  } else {
+    attempts.count += 1;
+    attempts.lastAttempt = Date.now();
+    if (attempts.count >= MAX_LOGIN_ATTEMPTS) {
+      attempts.lockedUntil = Date.now() + LOGIN_LOCKOUT_DURATION;
+    }
+    localStorage.setItem(LOGIN_ATTEMPTS_KEY, JSON.stringify(attempts));
+  }
+}
+
+function isLoginLocked(): { locked: boolean; remainingMs?: number } {
+  const attempts = getLoginAttempts();
+  if (attempts.lockedUntil && attempts.lockedUntil > Date.now()) {
+    return { locked: true, remainingMs: attempts.lockedUntil - Date.now() };
+  }
+  // Reset if lockout period has passed
+  if (attempts.lockedUntil && attempts.lockedUntil <= Date.now()) {
+    localStorage.removeItem(LOGIN_ATTEMPTS_KEY);
+  }
+  return { locked: false };
+}
 
 const SEED_USERS: StudioUser[] = [
   { ...DEFAULT_PERMS, id: "root", name: "Monesh", role: "superadmin", username: "monesh", password: "admin91466", specialty: "Founder · Vaidyagan", hue: "#d6b45f", active: true, createdAt: "2024-01-01", canPublishDirect: true, storeAccess: true, consoleAccess: true, consoleRole: "editor" },
@@ -47,10 +119,37 @@ function loadUsers(): StudioUser[] {
     const raw = localStorage.getItem(USERS_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as StudioUser[];
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed.map(normalizeUser);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        // Migrate plain-text passwords to hashed versions
+        const migrated = parsed.map(u => {
+          if (u.password && !u.password.startsWith('$2a$')) {
+            // In production, use bcrypt. For demo, we'll use a simple hash
+            return { ...u, password: hashPassword(u.password) };
+          }
+          return u;
+        });
+        return migrated.map(normalizeUser);
+      }
     }
   } catch { /* seeds */ }
-  return SEED_USERS;
+  // Hash seed passwords on first load
+  return SEED_USERS.map(u => ({ ...u, password: hashPassword(u.password) }));
+}
+
+// Simple password hashing (in production, use bcrypt)
+function hashPassword(password: string): string {
+  // This is a demo hash - in production use bcrypt with proper salt
+  let hash = 0;
+  for (let i = 0; i < password.length; i++) {
+    const char = password.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return `$2a$10$${hash.toString(36)}`;
+}
+
+function verifyPassword(password: string, hash: string): boolean {
+  return hashPassword(password) === hash;
 }
 function persistUsers(users: StudioUser[]) {
   try { localStorage.setItem(USERS_KEY, JSON.stringify(users)); } catch { /* ignore */ }
@@ -60,10 +159,31 @@ export const auth = {
   list(): StudioUser[] { return loadUsers(); },
   get(id: string): StudioUser | null { return loadUsers().find((u) => u.id === id) ?? null; },
   login(username: string, password: string): StudioUser | null {
-    const u = loadUsers().find((x) => x.username.toLowerCase() === username.trim().toLowerCase() && x.password === password);
-    if (!u || !u.active) return null;
+    // Check rate limiting
+    const lockStatus = isLoginLocked();
+    if (lockStatus.locked) {
+      // Return null instead of throwing - let UI handle the error message
+      return null;
+    }
+
+    const u = loadUsers().find((x) => x.username.toLowerCase() === username.trim().toLowerCase());
+    if (!u || !u.active) {
+      recordLoginAttempt(false);
+      return null;
+    }
+    // Verify password against hash
+    if (!verifyPassword(password, u.password)) {
+      recordLoginAttempt(false);
+      return null;
+    }
+    // Successful login - reset attempts
+    recordLoginAttempt(true);
     try { localStorage.setItem(SESSION_KEY, u.id); } catch { /* ignore */ }
     return u;
+  },
+
+  getLockStatus(): { locked: boolean; remainingMs?: number } {
+    return isLoginLocked();
   },
   session(): StudioUser | null {
     try {
@@ -393,6 +513,33 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   /* orders */
   const placeOrder = useCallback((cust: OrderCustomer, paymentMethod?: string, extra?: { discountCode?: string; discountAmount?: number; shippingFee?: number }): Order => {
+    // Validate cart is not empty
+    if (cart.length === 0) {
+      throw new Error("Cannot place order with empty cart");
+    }
+
+    // Sanitize customer data
+    const sanitizedCust: OrderCustomer = {
+      name: sanitizeText(cust.name),
+      phone: cust.phone ? sanitizeText(cust.phone) : "",
+      address: sanitizeText(cust.address),
+      city: sanitizeText(cust.city),
+      pin: sanitizeText(cust.pin),
+    };
+
+    // Validate stock availability
+    const stockCheck = cart.map(l => {
+      const p = products.find(x => x.id === l.id);
+      if (!p) return { valid: false, reason: "Product not found" };
+      if (p.stock < l.qty) return { valid: false, reason: `Insufficient stock for ${p.name}` };
+      return { valid: true };
+    });
+
+    const invalidItems = stockCheck.filter(c => !c.valid);
+    if (invalidItems.length > 0) {
+      throw new Error(`Cannot place order: ${invalidItems.map(i => i.reason).join(", ")}`);
+    }
+
     const items = cart.map((l) => {
       const p = products.find((x) => x.id === l.id);
       return { name: p?.name ?? "Formulation", qty: l.qty, price: p?.price ?? 0, productId: p?.id, image: p?.image };
@@ -400,12 +547,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const itemsTotal = items.reduce((s, i) => s + i.price * i.qty, 0);
     const discount = Math.min(extra?.discountAmount ?? 0, itemsTotal);
     const total = Math.max(0, itemsTotal - discount) + (extra?.shippingFee ?? 0);
+
+    // Generate unique order ID with timestamp to prevent duplicates
+    const orderId = `VG-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+
     const order: Order = {
-      id: `VG-${Math.floor(1000 + Math.random() * 9000)}`, customer: cust, items, total,
+      id: orderId, customer: sanitizedCust, items, total,
       status: "new", placedAt: new Date().toISOString(), customerId: customer?.id, paymentMethod,
-      discountCode: extra?.discountCode, discountAmount: discount || undefined, shippingFee: extra?.shippingFee,
+      discountCode: extra?.discountCode ? sanitizeText(extra.discountCode) : undefined,
+      discountAmount: discount || undefined, shippingFee: extra?.shippingFee,
     };
-    setOrders((o) => { const next = [order, ...o]; try { localStorage.setItem(ORDERS_KEY, JSON.stringify(next)); } catch { /* ignore */ } return next; });
+
+    setOrders((o) => {
+      const next = [order, ...o];
+      try { localStorage.setItem(ORDERS_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
     setProducts((list) => {
       const next = list.map((p) => {
         const line = cart.find((l) => l.id === p.id);
@@ -419,7 +576,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       try { localStorage.setItem(PRODUCTS_KEY, JSON.stringify(next)); } catch { /* ignore */ }
       return next;
     });
-    try { pushNotif({ title: `New order ${order.id}`, body: `${cust.name} · ₹${total.toLocaleString("en-IN")} · ${paymentMethod ?? "—"}`, icon: "order" }); } catch { /* ignore */ }
+    try { pushNotif({ title: `New order ${order.id}`, body: `${sanitizedCust.name} · ₹${total.toLocaleString("en-IN")} · ${paymentMethod ?? "—"}`, icon: "order" }); } catch { /* ignore */ }
     setCart([]);
     return order;
   }, [cart, products, customer]);

@@ -43,10 +43,24 @@ function LoginScreen({ onLogin }: { onLogin: (u: StudioUser) => void }) {
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Check if account is locked
+    const lockStatus = auth.getLockStatus();
+    if (lockStatus.locked) {
+      setError(`Too many failed attempts. Please try again in ${Math.ceil((lockStatus.remainingMs || 0) / 60000)} minutes.`);
+      return;
+    }
+
     const u = auth.login(username, password);
     if (!u) {
       const exists = auth.list().some((x) => x.username.toLowerCase() === username.trim().toLowerCase());
-      setError(exists ? "Incorrect password — please try again." : "No account found with that username.");
+      // Check lock status again after failed attempt
+      const newLockStatus = auth.getLockStatus();
+      if (newLockStatus.locked) {
+        setError(`Too many failed attempts. Please try again in ${Math.ceil((newLockStatus.remainingMs || 0) / 60000)} minutes.`);
+      } else {
+        setError(exists ? "Incorrect password — please try again." : "No account found with that username.");
+      }
       return;
     }
     toast(`Namaste, ${u.name} — the desk is open`);
