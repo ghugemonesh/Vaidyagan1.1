@@ -76,13 +76,20 @@ export function isDoctorListed(userId: string): boolean {
   const p = profileFor(userId);
   // Check profile listing first
   if (p && !p.listed) return false;
-  // Check Studio permission for footer visibility
+  
+  // Check Studio permission for footer visibility directly from localStorage
   try {
-    const user = auth.get(userId);
-    if (user && user.showInFooter === false) return false;
+    const raw = localStorage.getItem("vaidyagan_studio_users_v1");
+    if (raw) {
+      const users = JSON.parse(raw) as Array<{ id: string; showInFooter?: boolean }>;
+      const user = users.find((u) => u.id === userId);
+      // If user exists and showInFooter is explicitly false, hide them
+      if (user && user.showInFooter === false) return false;
+    }
   } catch {
-    // If auth not available, default to showing
+    // If localStorage not available, default to showing
   }
+  
   return true;
 }
 

@@ -536,6 +536,20 @@ export function AccountAuthModal() {
 
 export function Footer() {
   const { navigate } = useApp();
+  // Force re-render when permissions change by tracking auth users
+  const [, setRefresh] = useState(0);
+  useEffect(() => {
+    // Listen for storage changes to detect permission updates
+    const handleStorage = () => setRefresh((r) => r + 1);
+    window.addEventListener("storage", handleStorage);
+    // Also check periodically for changes in same tab
+    const interval = setInterval(() => setRefresh((r) => r + 1), 1000);
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      clearInterval(interval);
+    };
+  }, []);
+  
   return (
     <footer className="relative border-t border-forest-800 bg-forest-900/40">
       <div className="mx-auto max-w-7xl px-5 py-14 lg:px-8">
